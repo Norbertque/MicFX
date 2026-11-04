@@ -9,8 +9,9 @@
 AppId={{8E7A2C51-9D1B-4F2E-B1B0-5C0E1D9FA1CE}
 AppName=MicFX
 AppVersion={#MyAppVersion}
-AppPublisher=Norbeto0
-AppPublisherURL=https://github.com/Norbeto0/MicFX
+AppPublisher=Norbertque
+AppPublisherURL=https://github.com/Norbertque/MicFX
+AppCopyright=Copyright (C) 2026 Norbertque
 DefaultDirName={autopf}\MicFX
 DefaultGroupName=MicFX
 UninstallDisplayIcon={app}\MicFX.exe
@@ -29,6 +30,8 @@ Name: "desktopicon"; Description: "Create a &desktop icon"; Flags: unchecked
 
 [Files]
 Source: "..\publish\MicFX.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignoreversion
+Source: "..\THIRD-PARTY-NOTICES.txt"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\MicFX"; Filename: "{app}\MicFX.exe"

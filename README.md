@@ -152,5 +152,17 @@ tests/MicFX.Tests/               xUnit tests for the audio code
 Uses [NAudio](https://github.com/naudio/NAudio) (MIT) and
 [RNNoise](https://github.com/xiph/rnnoise) (BSD-3-Clause, compiled from the
 pinned official source during the release build; local dev builds without the
-native library fall back to the spectral suppressor). VB-Audio Virtual Cable
-is donationware by VB-Audio Software.
+native library fall back to the spectral suppressor). Their licenses, and the
+.NET runtime's, are in [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt),
+which ships with every download and is shown in the app under Settings >
+About. VB-Audio Virtual Cable is donationware by VB-Audio Software.
+
+## License
+
+Copyright (C) 2026 Norbertque
+
+MicFX is free software: you can redistribute it and/or modify it under the
+terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version. It is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; see [LICENSE](LICENSE) for details.

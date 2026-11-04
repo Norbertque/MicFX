@@ -10,7 +10,12 @@ namespace MicFX;
 
 public partial class MainWindow
 {
-    private const string RepoSlug = "Norbeto0/MicFX";
+    internal const string RepoSlug = "Norbertque/MicFX";
+    // Releases are looked up by the repository's numeric id: unlike the
+    // owner/name pair it survives renames, and nobody can take it over by
+    // registering an account name that a rename freed up. The name is the
+    // fallback in case the id endpoint ever stops answering.
+    private const long RepoId = 1287338191;
 
     private Action? noticeAction;
     private Action? noticeSecondaryAction;
@@ -84,8 +89,7 @@ public partial class MainWindow
         {
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
             http.DefaultRequestHeaders.UserAgent.ParseAdd("MicFX-Updater");
-            string json = await http.GetStringAsync(
-                $"https://api.github.com/repos/{RepoSlug}/releases/latest");
+            string json = await FetchLatestReleaseJsonAsync(http);
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
             string? tag = root.GetProperty("tag_name").GetString();
@@ -112,7 +116,7 @@ public partial class MainWindow
                 {
                     string? name = asset.GetProperty("name").GetString();
                     string? download = asset.GetProperty("browser_download_url").GetString();
-                    if (name == null || download == null) continue;
+                    if (name == null || download == null || !IsGitHubDownload(download)) continue;
                     if (name.StartsWith("MicFX-Setup", StringComparison.OrdinalIgnoreCase))
                         updateSetupUrl = download;
                     else if (name.Equals("MicFX.exe", StringComparison.OrdinalIgnoreCase))
@@ -141,6 +145,25 @@ public partial class MainWindow
             if (manual) txtUpdateStatus.Text = "Could not reach GitHub. Check your connection.";
         }
     }
+
+    private static async Task<string> FetchLatestReleaseJsonAsync(HttpClient http)
+    {
+        try
+        {
+            return await http.GetStringAsync($"https://api.github.com/repositories/{RepoId}/releases/latest");
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode != HttpStatusCode.Forbidden)
+        {
+            // 403 is GitHub's rate limit and would hit the fallback as well.
+            return await http.GetStringAsync($"https://api.github.com/repos/{RepoSlug}/releases/latest");
+        }
+    }
+
+    /// <summary>Release assets are only ever downloaded from GitHub itself, over HTTPS.</summary>
+    private static bool IsGitHubDownload(string url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var uri)
+        && uri.Scheme == Uri.UriSchemeHttps
+        && uri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Downloads and applies the update. Installed copies (in

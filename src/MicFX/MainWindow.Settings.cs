@@ -246,6 +246,12 @@ public partial class MainWindow
     private string CurrentLatencyMode() =>
         (comboLatency.SelectedItem as ComboBoxItem)?.Tag as string ?? "Normal";
 
+    private void About_Click(object sender, RoutedEventArgs e)
+    {
+        btnMenu.IsChecked = false;
+        new AboutWindow(this).ShowDialog();
+    }
+
     private void Latency_Changed(object sender, SelectionChangedEventArgs e)
     {
         if (initializing) return;

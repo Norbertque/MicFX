@@ -13,6 +13,10 @@
     <RootNamespace>MicFX</RootNamespace>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <Version>1.10.1</Version>
+    <Product>MicFX</Product>
+    <Authors>Norbertque</Authors>
+    <Copyright>Copyright (C) 2026 Norbertque</Copyright>
+    <Description>Microphone processor for Windows</Description>
   </PropertyGroup>
 
   <ItemGroup>
@@ -27,6 +31,12 @@
 
   <ItemGroup>
     <Resource Include="Assets/micfx.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Shown in About. Embedded so the portable single-file exe carries them too. -->
+    <EmbeddedResource Include="../../LICENSE" LogicalName="MicFX.LICENSE.txt" />
+    <EmbeddedResource Include="../../THIRD-PARTY-NOTICES.txt" LogicalName="MicFX.THIRD-PARTY-NOTICES.txt" />
   </ItemGroup>
 
   <ItemGroup>

@@ -79,9 +79,9 @@ public partial class MainWindow : Window
         if (Environment.GetCommandLineArgs().Contains("--updated"))
             txtStatus.Text = $"Updated to v{version.Major}.{version.Minor}.{version.Build} ✓";
 
+        mainArea.SizeChanged += (_, _) => FitEqHeight();
         // Run after the first full layout pass, so the left column has been
         // measured and DesiredSize is meaningful.
-        mainArea.SizeChanged += (_, _) => FitEqHeight();
         Loaded += (_, _) => Dispatcher.BeginInvoke(UpdateMinHeight, DispatcherPriority.Loaded);
         noticeBar.IsVisibleChanged += (_, _) =>
             Dispatcher.BeginInvoke(UpdateMinHeight, DispatcherPriority.Loaded);
