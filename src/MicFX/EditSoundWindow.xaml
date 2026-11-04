@@ -25,7 +25,7 @@
         <CheckBox x:Name="chkLoop" Content="Loop until stopped (click the tile again to stop)"
                   Margin="0,0,0,10"/>
 
-        <TextBlock Text="Hotkey — click the box, then press a combination (Esc clears)"
+        <TextBlock Text="Hotkey — click the box, then press a combination (Esc resets)"
                    FontSize="11" Foreground="{StaticResource SubtleTextBrush}"/>
         <TextBox x:Name="txtHotkey" IsReadOnly="True" Text="(default)"
                  Background="{StaticResource PanelBrush}"
@@ -33,7 +33,7 @@
                  BorderBrush="{StaticResource BorderBrush}"
                  Padding="6,4" Margin="0,2,0,2"
                  PreviewKeyDown="Hotkey_KeyDown"/>
-        <TextBlock x:Name="lblHotkeyHint" Text="" FontSize="11"
+        <TextBlock x:Name="lblHotkeyHint" Text="" FontSize="11" TextWrapping="Wrap"
                    Foreground="{StaticResource SubtleTextBrush}" Margin="0,0,0,10"/>
 
         <DockPanel>

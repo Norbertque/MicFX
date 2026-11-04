@@ -68,6 +68,9 @@ public class AppSettings
     public int EqBandCount { get; set; } = 10;
     public string LatencyMode { get; set; } = "Normal";
     public bool MatchClipLoudness { get; set; } = true;
+    /// <summary>Global hotkey that stops every clip; 0/0 = the default Ctrl+Alt+0.</summary>
+    public uint StopAllHotkeyMods { get; set; }
+    public uint StopAllHotkeyVk { get; set; }
     public string AccentColor { get; set; } = Theme.DefaultAccent;
 
     private static string SettingsDir =>

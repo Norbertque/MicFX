@@ -1,6 +1,7 @@
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using MicFX.Audio;
 using Microsoft.Win32;
 
@@ -10,6 +11,7 @@ public partial class MainWindow
 {
     private readonly Dictionary<SoundTile, object> loopingClips = new();
     private HotkeyManager? hotkeys;
+    private const int StopAllHotkeyId = 900; // tile hotkeys use their index, 0..n-1
 
     // ---------- soundboard volume ----------
 
@@ -85,19 +87,21 @@ public partial class MainWindow
         if ((sender as MenuItem)?.Tag is not SoundTile tile) return;
 
         var dialog = new EditSoundWindow(this, tile.Name, tile.Volume, tile.Loop,
-            tile.HotkeyMods, tile.HotkeyVk, tile.HotkeyText,
+            tile.HotkeyMods, tile.HotkeyVk, DefaultHotkey(tile.Index),
             preview: volume => TryPreview(tile.Path, EffectiveVolume(tile, volume)));
+        // Released while the dialog is open, so pressing an existing hotkey in
+        // the hotkey box records it instead of playing a sound.
+        hotkeys?.Clear();
         bool? ok = dialog.ShowDialog();
         engine.StopPreview();
-        if (ok != true) return;
-
-        tile.Name = dialog.SoundName;
-        tile.Volume = dialog.ClipVolume;
-        tile.Loop = dialog.Loop;
-        tile.HotkeyMods = dialog.HotkeyMods;
-        tile.HotkeyVk = dialog.HotkeyVk;
-        tile.HotkeyText = dialog.HotkeyText;
-        RefreshTileIndexes();
+        if (ok == true)
+        {
+            tile.Name = dialog.SoundName;
+            tile.Volume = dialog.ClipVolume;
+            tile.Loop = dialog.Loop;
+            tile.HotkeyMods = dialog.HotkeyMods;
+            tile.HotkeyVk = dialog.HotkeyVk;
+        }
         RefreshHotkeys();
     }
 
@@ -141,6 +145,12 @@ public partial class MainWindow
 
     private void StopAll_Click(object sender, RoutedEventArgs e) => engine.StopAllClips();
 
+    private void OnHotkey(int id)
+    {
+        if (id == StopAllHotkeyId) engine.StopAllClips();
+        else PlaySlot(id);
+    }
+
     private void PlaySlot(int index)
     {
         if (index >= 0 && index < sounds.Count)
@@ -173,7 +183,6 @@ public partial class MainWindow
             {
                 loopingClips[tile] = handle;
                 tile.IsLooping = true;
-                icSounds.Items.Refresh();
             }
         }
         catch (Exception ex)
@@ -191,7 +200,6 @@ public partial class MainWindow
             {
                 entry.Key.IsLooping = false;
                 loopingClips.Remove(entry.Key);
-                icSounds.Items.Refresh();
             }
         });
     }
@@ -200,20 +208,86 @@ public partial class MainWindow
     {
         for (int i = 0; i < sounds.Count; i++)
             sounds[i].Index = i;
-        icSounds.Items.Refresh();
     }
 
+    // ---------- hotkeys ----------
+
+    /// <summary>The first nine tiles default to Ctrl+Alt+1..9; the rest have none unless set.</summary>
+    private static (uint Mods, uint Vk) DefaultHotkey(int index) =>
+        index is >= 0 and < 9 ? (HotkeyManager.ModControl | HotkeyManager.ModAlt, (uint)('1' + index)) : (0u, 0u);
+
+    private static (uint Mods, uint Vk) EffectiveHotkey(SoundTile tile) =>
+        tile.HotkeyVk != 0 ? (tile.HotkeyMods, tile.HotkeyVk) : DefaultHotkey(tile.Index);
+
+    private (uint Mods, uint Vk) StopAllHotkey =>
+        settings.StopAllHotkeyVk != 0
+            ? (settings.StopAllHotkeyMods, settings.StopAllHotkeyVk)
+            : (HotkeyManager.ModControl | HotkeyManager.ModAlt, (uint)'0');
+
+    /// <summary>
+    /// Registers each tile's hotkey and the stop-all hotkey, and labels the
+    /// tiles. A hotkey that is taken, or that blocks typing an AltGr character
+    /// on this keyboard, gets a ⚠ with the reason in the tile's tooltip.
+    /// </summary>
     private void RefreshHotkeys()
     {
-        if (hotkeys == null) return;
-        hotkeys.Clear();
+        hotkeys?.Clear();
         for (int i = 0; i < sounds.Count; i++)
         {
             var tile = sounds[i];
-            if (tile.HotkeyVk != 0)
-                hotkeys.Register(i, tile.HotkeyMods, tile.HotkeyVk);
-            else if (i < 9)
-                hotkeys.Register(i, HotkeyManager.ModControl | HotkeyManager.ModAlt, (uint)('1' + i));
+            var (mods, vk) = EffectiveHotkey(tile);
+            if (vk == 0)
+            {
+                tile.HotkeyLabel = "";
+                tile.HotkeyWarning = null;
+                continue;
+            }
+            tile.HotkeyLabel = HotkeyNames.Describe(mods, vk);
+            tile.HotkeyWarning = hotkeys != null && !hotkeys.Register(i, mods, vk)
+                ? $"{tile.HotkeyLabel} is already taken by another tile or app, so it does nothing here. " +
+                  "Right-click the tile and choose Edit to pick another key."
+                : HotkeyNames.AltGrWarning(mods, vk);
         }
+
+        var (stopMods, stopVk) = StopAllHotkey;
+        bool stopRegistered = hotkeys == null || hotkeys.Register(StopAllHotkeyId, stopMods, stopVk);
+        ShowStopAllHotkey(stopRegistered ? null : "Already taken by another app, so it does nothing.");
     }
+
+    private void ShowStopAllHotkey(string? problem)
+    {
+        var (mods, vk) = StopAllHotkey;
+        txtStopAllHotkey.Text = HotkeyNames.Describe(mods, vk);
+        string? hint = problem ?? HotkeyNames.AltGrWarning(mods, vk);
+        lblStopAllHint.Text = hint == null ? "" : "⚠ " + hint;
+        lblStopAllHint.Visibility = hint == null ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    private void StopAllHotkey_KeyDown(object sender, KeyEventArgs e)
+    {
+        switch (HotkeyCapture.Read(e, out uint mods, out uint vk))
+        {
+            case HotkeyCapture.Outcome.Cleared:
+                settings.StopAllHotkeyMods = 0;
+                settings.StopAllHotkeyVk = 0;
+                break;
+            case HotkeyCapture.Outcome.Captured:
+                settings.StopAllHotkeyMods = mods;
+                settings.StopAllHotkeyVk = vk;
+                break;
+            case HotkeyCapture.Outcome.Rejected:
+                lblStopAllHint.Text = HotkeyCapture.RejectedHint;
+                lblStopAllHint.Visibility = Visibility.Visible;
+                return;
+            default:
+                return;
+        }
+        ShowStopAllHotkey(null); // registered (and checked) again when the box loses focus
+    }
+
+    // While a hotkey box has focus, MicFX's own hotkeys are released, so the
+    // combination being set is recorded instead of triggering a clip.
+    private void HotkeyBox_GotFocus(object sender, KeyboardFocusChangedEventArgs e) => hotkeys?.Clear();
+
+    private void HotkeyBox_LostFocus(object sender, KeyboardFocusChangedEventArgs e) => RefreshHotkeys();
 }

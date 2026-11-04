@@ -51,7 +51,6 @@ public partial class MainWindow
                 Loop = clip.Loop,
                 HotkeyMods = clip.HotkeyMods,
                 HotkeyVk = clip.HotkeyVk,
-                HotkeyText = clip.HotkeyText,
                 LoudnessLufs = clip.LoudnessLufs
             });
         }
@@ -121,7 +120,8 @@ public partial class MainWindow
                 Loop = s.Loop,
                 HotkeyMods = s.HotkeyMods,
                 HotkeyVk = s.HotkeyVk,
-                HotkeyText = s.HotkeyText,
+                // Labels are computed from mods/vk; stored only to keep the file readable.
+                HotkeyText = s.HotkeyVk != 0 ? s.HotkeyLabel : null,
                 LoudnessLufs = s.LoudnessLufs
             })
             .ToList();

@@ -1,19 +1,65 @@
+using System.ComponentModel;
+using System.Runtime.CompilerServices;
+
 namespace MicFX;
 
-public class SoundTile
+/// <summary>
+/// One soundboard tile. The properties the tile template shows raise
+/// PropertyChanged, so labels and playback progress update in place instead
+/// of the whole list being rebuilt.
+/// </summary>
+public class SoundTile : INotifyPropertyChanged
 {
-    public string Name { get; set; } = "";
+    private string name = "";
+    private bool isLooping;
+    private string hotkeyLabel = "";
+    private string? hotkeyWarning;
+
+    public string Name { get => name; set => Set(ref name, value); }
     public string Path { get; set; } = "";
     public float Volume { get; set; } = 1f;
     public bool Loop { get; set; }
+    /// <summary>Custom hotkey (Win32 MOD_* flags + virtual key); 0/0 = the slot default.</summary>
     public uint HotkeyMods { get; set; }
     public uint HotkeyVk { get; set; }
-    public string? HotkeyText { get; set; }
     public double? LoudnessLufs { get; set; }
     public int Index { get; set; }
-    public bool IsLooping { get; set; }
+
+    public bool IsLooping
+    {
+        get => isLooping;
+        set { if (Set(ref isLooping, value)) OnPropertyChanged(nameof(StatusLabel)); }
+    }
+
+    /// <summary>The effective hotkey as printed on this keyboard; empty when the tile has none.</summary>
+    public string HotkeyLabel
+    {
+        get => hotkeyLabel;
+        set { if (Set(ref hotkeyLabel, value)) OnPropertyChanged(nameof(StatusLabel)); }
+    }
+
+    /// <summary>Why the hotkey is a problem (blocks an AltGr character, taken by another app); null if fine.</summary>
+    public string? HotkeyWarning
+    {
+        get => hotkeyWarning;
+        set { if (Set(ref hotkeyWarning, value)) OnPropertyChanged(nameof(StatusLabel)); }
+    }
 
     public string StatusLabel =>
         IsLooping ? "⟳ looping — click to stop"
-        : HotkeyText ?? (Index < 9 ? $"Ctrl+Alt+{Index + 1}" : "");
+        : HotkeyWarning != null ? $"{HotkeyLabel} ⚠"
+        : HotkeyLabel;
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    private void OnPropertyChanged([CallerMemberName] string? property = null) =>
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(property));
+
+    private bool Set<T>(ref T field, T value, [CallerMemberName] string? property = null)
+    {
+        if (EqualityComparer<T>.Default.Equals(field, value)) return false;
+        field = value;
+        OnPropertyChanged(property);
+        return true;
+    }
 }

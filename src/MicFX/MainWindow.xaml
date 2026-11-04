@@ -80,6 +80,15 @@
                         <TextBlock Text="Lower settings reduce delay but may crackle on slower PCs. Exclusive takes over the mic while the engine runs."
                                    FontSize="11" Foreground="{StaticResource SubtleTextBrush}"
                                    TextWrapping="Wrap" Margin="0,4,0,0"/>
+                        <TextBlock Text="Stop all sounds hotkey" FontSize="11"
+                                   Foreground="{StaticResource SubtleTextBrush}" Margin="0,12,0,0"/>
+                        <TextBox x:Name="txtStopAllHotkey" IsReadOnly="True" Text="Ctrl+Alt+0"
+                                 Padding="6,4" Margin="0,2,0,0"
+                                 ToolTip="Click, then press a combination. Esc resets it to Ctrl+Alt+0."
+                                 PreviewKeyDown="StopAllHotkey_KeyDown"
+                                 GotKeyboardFocus="HotkeyBox_GotFocus" LostKeyboardFocus="HotkeyBox_LostFocus"/>
+                        <TextBlock x:Name="lblStopAllHint" FontSize="11" TextWrapping="Wrap" Visibility="Collapsed"
+                                   Foreground="{StaticResource SubtleTextBrush}" Margin="0,4,0,0"/>
                         <TextBlock Text="Theme color" FontSize="11" Foreground="{StaticResource SubtleTextBrush}"
                                    Margin="0,12,0,4"/>
                         <WrapPanel x:Name="accentSwatches" Margin="0,0,0,-6"/>
@@ -324,20 +333,21 @@
             <!-- Right bottom: soundboard strip -->
             <GroupBox Grid.Column="1" Grid.Row="1" Header="SOUNDBOARD" Margin="0,10,0,0">
                 <DockPanel>
-                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,6">
-                        <Button Content="＋ Add sound…" Click="AddSound_Click"/>
-                        <Button Content="⏹ Stop all" Margin="8,0,0,0" Click="StopAll_Click"/>
-                        <TextBlock Text="Volume" VerticalAlignment="Center" Margin="16,0,6,0" FontSize="11"
-                                   Foreground="{StaticResource SubtleTextBrush}"/>
-                        <Slider x:Name="sliderSoundVol" Width="140" Minimum="0" Maximum="1" Value="0.8"
+                    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6" LastChildFill="True">
+                        <Button DockPanel.Dock="Left" Content="＋ Add sound…" Click="AddSound_Click"/>
+                        <Button DockPanel.Dock="Left" Content="⏹ Stop all" Margin="8,0,0,0" Click="StopAll_Click"/>
+                        <TextBlock DockPanel.Dock="Left" Text="Volume" VerticalAlignment="Center" Margin="16,0,6,0"
+                                   FontSize="11" Foreground="{StaticResource SubtleTextBrush}"/>
+                        <Slider DockPanel.Dock="Left" x:Name="sliderSoundVol" Width="140" Minimum="0" Maximum="1" Value="0.8"
                                 VerticalAlignment="Center" ValueChanged="SoundVol_Changed"/>
-                        <CheckBox x:Name="chkMatchLoudness" Content="Even out loudness" Margin="16,0,0,0"
+                        <CheckBox DockPanel.Dock="Left" x:Name="chkMatchLoudness" Content="Even out loudness" Margin="16,0,0,0"
                                   VerticalAlignment="Center" Checked="MatchLoudness_Changed" Unchecked="MatchLoudness_Changed"
                                   ToolTip="Plays every clip at a similar loudness (-20 LUFS), measured once per clip. Quiet clips are raised at most 12 dB. Per-clip volume still applies on top."/>
-                        <TextBlock Text="Hotkeys Ctrl+Alt+1…9 (customizable) · right-click a tile to edit or remove"
+                        <TextBlock Text="Right-click a tile to edit or remove it" TextTrimming="CharacterEllipsis"
                                    VerticalAlignment="Center" Margin="16,0,0,0" FontSize="11"
-                                   Foreground="{StaticResource SubtleTextBrush}"/>
-                    </StackPanel>
+                                   Foreground="{StaticResource SubtleTextBrush}"
+                                   ToolTip="Hotkeys: the first nine tiles play with Ctrl+Alt+1 to 9 unless you set your own (right-click a tile, Edit). The stop-all hotkey is in the settings menu. You can also drop audio files here to add them."/>
+                    </DockPanel>
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                         <ItemsControl x:Name="icSounds">
                             <ItemsControl.ItemsPanel>
@@ -349,7 +359,8 @@
                                 <DataTemplate>
                                     <Button Width="132" Height="64" Margin="4"
                                             Style="{StaticResource TileButton}"
-                                            Click="SoundTile_Click" Tag="{Binding}">
+                                            Click="SoundTile_Click" Tag="{Binding}"
+                                            ToolTip="{Binding HotkeyWarning}">
                                         <StackPanel>
                                             <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"
                                                        TextAlignment="Center" MaxWidth="112"/>

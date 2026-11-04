@@ -69,8 +69,10 @@ public partial class MainWindow : Window
         CreateTrayIcon();
         StartDeviceWatcher();
         hotkeys = new HotkeyManager(this);
-        hotkeys.HotkeyPressed += id => Dispatcher.BeginInvoke(() => PlaySlot(id));
+        hotkeys.HotkeyPressed += id => Dispatcher.BeginInvoke(() => OnHotkey(id));
         RefreshHotkeys();
+        // Key names and AltGr clashes depend on the keyboard layout.
+        System.Windows.Input.InputLanguageManager.Current.InputLanguageChanged += (_, _) => RefreshHotkeys();
         StartSpectrumTimer();
         TryAutoStart();
         CheckCableSetup();

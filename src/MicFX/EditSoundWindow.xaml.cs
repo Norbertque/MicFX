@@ -13,25 +13,26 @@ public partial class EditSoundWindow : Window
     public string SoundName => txtName.Text.Trim();
     public float ClipVolume => (float)sliderVolume.Value;
     public bool Loop => chkLoop.IsChecked == true;
+    /// <summary>Custom hotkey; 0/0 means the tile uses its default.</summary>
     public uint HotkeyMods { get; private set; }
     public uint HotkeyVk { get; private set; }
-    public string? HotkeyText { get; private set; }
 
+    private readonly (uint Mods, uint Vk) defaultHotkey;
     private readonly Action<float>? preview;
 
     public EditSoundWindow(Window owner, string name, float volume, bool loop,
-        uint hotkeyMods, uint hotkeyVk, string? hotkeyText, Action<float>? preview)
+        uint hotkeyMods, uint hotkeyVk, (uint Mods, uint Vk) defaultHotkey, Action<float>? preview)
     {
         InitializeComponent();
         Owner = owner;
         this.preview = preview;
+        this.defaultHotkey = defaultHotkey;
         txtName.Text = name;
         sliderVolume.Value = volume;
         chkLoop.IsChecked = loop;
         HotkeyMods = hotkeyMods;
         HotkeyVk = hotkeyVk;
-        HotkeyText = hotkeyText;
-        txtHotkey.Text = hotkeyText ?? "(default)";
+        ShowHotkey();
     }
 
     private void Volume_Changed(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -41,64 +42,40 @@ public partial class EditSoundWindow : Window
 
     private void Hotkey_KeyDown(object sender, KeyEventArgs e)
     {
-        e.Handled = true;
-        var key = e.Key == Key.System ? e.SystemKey : e.Key;
-
-        if (key is Key.Escape or Key.Back or Key.Delete)
+        switch (HotkeyCapture.Read(e, out uint mods, out uint vk))
         {
-            HotkeyMods = 0;
-            HotkeyVk = 0;
-            HotkeyText = null;
-            txtHotkey.Text = "(default)";
+            case HotkeyCapture.Outcome.Cleared:
+                HotkeyMods = 0;
+                HotkeyVk = 0;
+                ShowHotkey();
+                break;
+            case HotkeyCapture.Outcome.Captured:
+                HotkeyMods = mods;
+                HotkeyVk = vk;
+                ShowHotkey();
+                break;
+            case HotkeyCapture.Outcome.Rejected:
+                lblHotkeyHint.Text = HotkeyCapture.RejectedHint;
+                break;
+        }
+    }
+
+    /// <summary>The effective hotkey, plus a warning if it blocks an AltGr character on this keyboard.</summary>
+    private void ShowHotkey()
+    {
+        bool custom = HotkeyVk != 0;
+        var (mods, vk) = custom ? (HotkeyMods, HotkeyVk) : defaultHotkey;
+        if (vk == 0)
+        {
+            txtHotkey.Text = "(none)";
             lblHotkeyHint.Text = "";
             return;
         }
-        if (key is Key.LeftCtrl or Key.RightCtrl or Key.LeftAlt or Key.RightAlt
-            or Key.LeftShift or Key.RightShift or Key.LWin or Key.RWin)
-            return; // modifier alone — wait for the real key
-
-        var mods = Keyboard.Modifiers;
-        bool isFKey = key >= Key.F1 && key <= Key.F24;
-        if (mods == ModifierKeys.None && !isFKey)
-        {
-            lblHotkeyHint.Text = "Combine with Ctrl/Alt/Shift, or use an F-key.";
-            return;
-        }
-
-        uint winMods = 0;
-        var parts = new List<string>();
-        if (mods.HasFlag(ModifierKeys.Control)) { winMods |= HotkeyManager.ModControl; parts.Add("Ctrl"); }
-        if (mods.HasFlag(ModifierKeys.Alt)) { winMods |= HotkeyManager.ModAlt; parts.Add("Alt"); }
-        if (mods.HasFlag(ModifierKeys.Shift)) { winMods |= HotkeyManager.ModShift; parts.Add("Shift"); }
-        if (mods.HasFlag(ModifierKeys.Windows)) { winMods |= HotkeyManager.ModWin; parts.Add("Win"); }
-        parts.Add(KeyName(key));
-
-        HotkeyMods = winMods;
-        HotkeyVk = (uint)KeyInterop.VirtualKeyFromKey(key);
-        HotkeyText = string.Join("+", parts);
-        txtHotkey.Text = HotkeyText;
-        lblHotkeyHint.Text = "";
+        string label = HotkeyNames.Describe(mods, vk);
+        txtHotkey.Text = custom ? label : $"{label} (default)";
+        string? warning = HotkeyNames.AltGrWarning(mods, vk);
+        lblHotkeyHint.Text = warning == null ? "" : "⚠ " + warning;
     }
-
-    /// <summary>Readable key name: Key.D1 prints as "D1", which is not what a user pressed.</summary>
-    private static string KeyName(Key key) => key switch
-    {
-        >= Key.D0 and <= Key.D9 => ((char)('0' + (key - Key.D0))).ToString(),
-        >= Key.NumPad0 and <= Key.NumPad9 => $"Num{key - Key.NumPad0}",
-        Key.OemPlus => "+",
-        Key.OemMinus => "-",
-        Key.OemComma => ",",
-        Key.OemPeriod => ".",
-        Key.OemQuestion => "/",
-        Key.OemTilde => "`",
-        Key.OemOpenBrackets => "[",
-        Key.OemCloseBrackets => "]",
-        Key.OemSemicolon => ";",
-        Key.OemQuotes => "'",
-        Key.OemBackslash or Key.OemPipe => "\\",
-        Key.Space => "Space",
-        _ => key.ToString()
-    };
 
     private void Preview_Click(object sender, RoutedEventArgs e) => preview?.Invoke(ClipVolume);
 
