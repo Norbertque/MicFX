@@ -57,6 +57,10 @@ mic -> gain -> noise suppression -> gate -> EQ -> compressor
   monitor, so voice plus a loud clip cannot distort or blast your ears
 - Soundboard loudness matching: each clip is measured once (ITU-R BS.1770)
   and played at a similar loudness, with per-clip volume on top
+- Light on the CPU: the full chain with AI noise suppression, a 20-band EQ
+  and the leveler uses about 2.7% of one 2.1 GHz CPU core for a mono mic.
+  The audio threads run in Windows' real-time "Pro Audio" class (MMCSS), so
+  a busy game is less likely to cause dropouts
 - Latency modes in the settings menu: Normal (~90 ms mouth-to-app, safest),
   Low (smaller buffers), Lowest (additionally opens the mic in WASAPI
   exclusive mode, bypassing the Windows audio engine; falls back to shared

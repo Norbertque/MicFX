@@ -7,49 +7,31 @@
 The binaries are unsigned, so SmartScreen may warn on first run
 (More info > Run anyway). In-app updates are not affected.
 
-### Soundboard
+### Performance
 
-- Drag and drop: drop audio files, or a folder of them, onto the soundboard
-  to add them.
-- MicFX keeps its own copy of every clip (in `%APPDATA%\MicFX\Sounds`), so
-  moving, renaming or deleting the original file no longer breaks the tile.
-  Existing clips are copied once in the background after updating.
-- Clips start instantly: a silent lead-in at the start of a clip is detected
-  once and skipped (also for loops and preview). Can be turned off per clip
-  in Edit, which shows the measured time.
-- Playing clips show a progress bar on their tile.
-- New stop-all hotkey, Ctrl+Alt+0 by default; change it in the settings menu.
+- The audio threads now run in Windows' real-time "Pro Audio" scheduling
+  class (MMCSS). Before, they ran at normal priority, so a game keeping
+  every core busy could delay the audio and cause crackles or dropouts,
+  most likely in the Low and Lowest latency modes.
+- Garbage collection no longer does blocking full collections, which also
+  pause the audio threads.
+- Less CPU. Measured with MicFX's own audio code on a 2.1 GHz core
+  (percent of one core, 30 s of audio):
 
-### Hotkeys
+  | Main audio chain                       | 1.11.0 | 1.11.1 |
+  |----------------------------------------|--------|--------|
+  | Mono mic, AI suppression, EQ, leveler  | 3.8%   | 2.7%   |
+  | Mono mic, spectral suppression         | 2.2%   | 1.2%   |
+  | Stereo mic, AI suppression             | 6.0%   | 5.2%   |
 
-- Hotkeys show as printed on your keyboard. Labels saved by older versions,
-  such as "Ctrl+Alt+D1" or "Ctrl+Alt+Oem3", now read "Ctrl+Alt+1" or the
-  actual key.
-- Windows treats Ctrl+Alt as AltGr, so a Ctrl+Alt hotkey also blocks typing
-  that AltGr character everywhere while MicFX runs (on a Czech keyboard
-  Ctrl+Alt+1 is AltGr+1, which types ~). Such hotkeys are marked with ⚠ on
-  the tile, with the blocked character in the tooltip, and the hotkey editor
-  warns while you set one. Hotkeys another app already owns are marked too.
-- Setting a hotkey that MicFX already uses now records it instead of playing
-  the clip.
-
-### Fixes
-
-- Unplugging the microphone, or it starting late after boot, made MicFX
-  switch to another mic and forget yours. The mic now stays selected as
-  "(not connected)", MicFX waits, and it starts by itself when the mic is
-  back.
-- The soundboard toolbar hint no longer gets cut off.
-
-### License
-
-- MicFX is now licensed under the GNU GPL, version 3 or later. Copyright
-  (C) 2026 Norbertque.
-- The licenses of the bundled components (NAudio, RNNoise, .NET runtime) ship
-  with every download and are shown in the app under Settings > About.
-- The GitHub account was renamed to Norbertque. The in-app updater now finds
-  releases by the repository's permanent ID, so it keeps working through
-  future renames.
+  A mono mic now stays mono through gain, gate, EQ and leveler instead of
+  being processed twice as identical stereo, and the safety limiter (on the
+  output and the headphone monitor) only does its lookahead work when
+  something actually comes near the ceiling. Both produce exactly the same
+  sound as before.
+- With an auto-switch mic set up, MicFX no longer asks Windows for the full
+  device list every second; it reuses the list until a device changes.
+- While MicFX sits in the tray, the level meters are no longer updated.
 
 ### First-time setup
 
