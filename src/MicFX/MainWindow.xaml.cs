@@ -50,6 +50,7 @@ public partial class MainWindow : Window
         BuildAccentSwatches();
         icSounds.ItemsSource = sounds;
         engine.LevelsAvailable += OnLevels;
+        IsVisibleChanged += (_, _) => metersVisible = IsVisible;
         engine.ClipEnded += OnClipEndedUi;
         engine.MonitorFailed += _ => Dispatcher.BeginInvoke(OnMonitorFailed);
         engine.OutputFailed += ex => Dispatcher.BeginInvoke(() => OnOutputFailed(ex));

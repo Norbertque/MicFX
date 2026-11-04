@@ -1,3 +1,4 @@
+using System.Runtime;
 using System.Windows;
 
 namespace MicFX;
@@ -9,6 +10,10 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        // Avoid blocking full garbage collections: they suspend the audio
+        // threads too, long enough to break a 20 ms output buffer.
+        GCSettings.LatencyMode = GCLatencyMode.SustainedLowLatency;
 
         singleInstanceMutex = new Mutex(true, @"Local\MicFX_SingleInstance", out bool createdNew);
         if (!createdNew)

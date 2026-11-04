@@ -18,6 +18,12 @@ public sealed class MicActivityProbe : IDisposable
     private WasapiCapture? capture;
     private DateTime lastSoundUtc = DateTime.MinValue;
 
+    // A device that could not be opened is retried after a pause, not on
+    // every call (the caller polls once a second).
+    private static readonly TimeSpan RetryAfterFailure = TimeSpan.FromSeconds(10);
+    private string? failedDeviceId;
+    private DateTime failedAtUtc;
+
     /// <summary>Device currently being watched, or null.</summary>
     public string? DeviceId { get; private set; }
 
@@ -25,6 +31,13 @@ public sealed class MicActivityProbe : IDisposable
     public bool Failed { get; private set; }
 
     public bool HasSoundWithin(TimeSpan window) => DateTime.UtcNow - lastSoundUtc <= window;
+
+    /// <summary>Already listening to this device, so there is nothing to open.</summary>
+    public bool IsWatching(string deviceId) => capture != null && DeviceId == deviceId;
+
+    /// <summary>Opening this device failed moments ago; try again later.</summary>
+    public bool RecentlyFailed(string deviceId) =>
+        failedDeviceId == deviceId && DateTime.UtcNow - failedAtUtc < RetryAfterFailure;
 
     public void Watch(MMDevice device)
     {
@@ -37,11 +50,14 @@ public sealed class MicActivityProbe : IDisposable
             capture.StartRecording();
             DeviceId = device.ID;
             Failed = false;
+            failedDeviceId = null;
         }
         catch
         {
             Stop();
             Failed = true;
+            failedDeviceId = device.ID;
+            failedAtUtc = DateTime.UtcNow;
         }
     }
 

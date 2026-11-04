@@ -22,6 +22,13 @@ public partial class MainWindow
     private readonly MicActivityProbe probe = new();
     private string? activeInputId;
     private string runningStatus = "";
+
+    // Active capture devices for the once-a-second auto-switch check. Rebuilt
+    // by PopulateDevices; any device notification marks it stale at once (the
+    // full refresh is debounced), so a decision never uses an outdated list.
+    private List<AudioDeviceInfo> captureDevicesCache = new();
+    private bool captureDevicesStale = true;
+
     // The user wants the engine running, but the chosen mic is unplugged (or
     // not up yet after boot): it starts as soon as the device is back.
     private bool waitingForMic;
@@ -52,6 +59,8 @@ public partial class MainWindow
         // or switched off ("(not connected)"), so the choice survives until it
         // is back instead of falling to whatever Windows uses by default.
         var captureDevices = AudioDevices.GetCaptureDevices();
+        captureDevicesCache = captureDevices;
+        captureDevicesStale = false;
         comboMic.ItemsSource = AudioDevices.WithRemembered(captureDevices, selectedMic, settings.InputDeviceName);
         if (captureDevices.FirstOrDefault(d => d.Id == selectedMic) is { } micDevice)
             settings.InputDeviceName = micDevice.Name;
@@ -107,7 +116,12 @@ public partial class MainWindow
     /// </summary>
     private AudioDeviceInfo? ResolveInputDevice()
     {
-        var available = AudioDevices.GetCaptureDevices();
+        if (captureDevicesStale)
+        {
+            captureDevicesCache = AudioDevices.GetCaptureDevices();
+            captureDevicesStale = false;
+        }
+        var available = captureDevicesCache;
         var ids = available.Select(d => d.Id).ToHashSet();
         string? primary = (comboMic.SelectedItem as AudioDeviceInfo)?.Id;
         string? preferred = PreferredInputId();
@@ -146,6 +160,7 @@ public partial class MainWindow
             probe.Stop();
             return;
         }
+        if (probe.IsWatching(preferred) || probe.RecentlyFailed(preferred)) return;
         try
         {
             probe.Watch(AudioDevices.GetDevice(preferred));
@@ -259,6 +274,7 @@ public partial class MainWindow
         deviceWatcher = new DeviceWatcher();
         deviceWatcher.Changed += () => Dispatcher.BeginInvoke(() =>
         {
+            captureDevicesStale = true;
             deviceDebounce!.Stop();
             deviceDebounce.Start();
         });

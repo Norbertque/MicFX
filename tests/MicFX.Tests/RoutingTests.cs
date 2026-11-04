@@ -108,4 +108,17 @@ public class RoutingTests
         Assert.True(MicActivityProbe.IsDigitalSilence(silent, silent.Length));
         Assert.False(MicActivityProbe.IsDigitalSilence(floor, floor.Length));
     }
+
+    /// <summary>
+    /// The real-time priority wrapper must pass audio through untouched, and
+    /// must not fail where avrt.dll does not exist (this test run).
+    /// </summary>
+    [Fact]
+    public void RealtimeThreadWrapper_PassesAudioThrough()
+    {
+        var x = new float[4800];
+        for (int i = 0; i < x.Length; i++) x[i] = MathF.Sin(i * 0.01f);
+        var y = TestSignals.ReadAll(new RealtimeThreadSampleProvider(TestSignals.FromArray(x)), x.Length);
+        Assert.Equal(x, y);
+    }
 }

@@ -10,9 +10,9 @@ public readonly record struct LevelReport(float InputDb, float OutputDb, bool In
 /// <summary>
 /// Owns the whole real-time graph:
 ///
-///   mic capture → drift guard → resample → noise suppression → (mono→stereo)
-///     → gain → meter → gate → EQ → spectrum tap → compressor → tee ─┐
-///                                                                   ├→ master → meter → output
+///   mic capture → drift guard → resample → noise suppression → gain → meter
+///     → gate → EQ → spectrum tap → compressor → (mono→stereo) → tee ─┐
+///                                                                    ├→ master → limiter → meter → output
 ///   soundboard clips → sub-mixer → soundboard volume → tee ──────────┘
 ///
 /// The two tees feed the monitor output through independent volume controls,
@@ -172,6 +172,7 @@ public class AudioEngine : IDisposable
         lastInputSoundUtc = DateTime.UtcNow;
         capture.DataAvailable += (_, e) =>
         {
+            AudioThreadPriority.Promote(); // raised on the capture thread
             if (!MicActivityProbe.IsDigitalSilence(e.Buffer, e.BytesRecorded))
                 lastInputSoundUtc = DateTime.UtcNow;
             micBuffer?.AddSamples(e.Buffer, 0, e.BytesRecorded);
@@ -186,9 +187,10 @@ public class AudioEngine : IDisposable
         denoise = new NoiseSuppressionSampleProvider(aiDenoise) { ReductionDb = denoiseStrengthDb };
         ApplyDenoise();
         mic = denoise;
-        if (mic.WaveFormat.Channels == 1)
-            mic = new MonoToStereoSampleProvider(mic);
 
+        // A mono mic stays mono through gain, gate, EQ and leveler: the same
+        // processing on two identical channels would only double the work.
+        // It becomes stereo just before the monitor tap and the mixer.
         micVolume = new VolumeSampleProvider(mic) { Volume = micGain };
         var inputMeter = new MeteringSampleProvider(micVolume, SampleRate / 20);
         inputMeter.StreamVolume += (_, e) =>
@@ -215,7 +217,10 @@ public class AudioEngine : IDisposable
         // own level in the user's headphones.
         monitorVoiceBuffer = NewMonitorBuffer();
         monitorSoundBuffer = NewMonitorBuffer();
-        voiceTee = new TeeSampleProvider(compressor) { Sink = monitorVoiceBuffer, Enabled = false };
+        ISampleProvider voice = compressor.WaveFormat.Channels == 1
+            ? new MonoToStereoSampleProvider(compressor)
+            : compressor;
+        voiceTee = new TeeSampleProvider(voice) { Sink = monitorVoiceBuffer, Enabled = false };
         soundTee = new TeeSampleProvider(soundboardVolume) { Sink = monitorSoundBuffer, Enabled = false };
 
         var mainMixer = new MixingSampleProvider(WaveFormat.CreateIeeeFloatWaveFormat(SampleRate, Channels))
@@ -248,7 +253,8 @@ public class AudioEngine : IDisposable
                 OutputFailed?.Invoke(e.Exception);
         };
         output = mainOut;
-        output.Init(new SampleToWaveProvider(outputMeter));
+        // The output thread runs the whole effect chain: give it real-time priority.
+        output.Init(new SampleToWaveProvider(new RealtimeThreadSampleProvider(outputMeter)));
 
         output.Play();
         IsRunning = true;
@@ -346,7 +352,8 @@ public class AudioEngine : IDisposable
         try
         {
             // Monitor levels go up to 150% per source: protect the listener's ears too.
-            opened.Init(new SampleToWaveProvider(new PeakLimiterSampleProvider(monitorMixer)));
+            opened.Init(new SampleToWaveProvider(
+                new RealtimeThreadSampleProvider(new PeakLimiterSampleProvider(monitorMixer))));
             opened.Play();
         }
         catch

@@ -103,8 +103,16 @@ public partial class MainWindow
     private DateTime inputHotUntil;
     private DateTime outputLimitedUntil;
 
+    // Set on the UI thread, read on the audio thread: while the window is
+    // hidden in the tray, level reports are dropped instead of drawn.
+    private volatile bool metersVisible;
+    private bool inputWarningShown;
+    private bool outputWarningShown;
+
+    /// <summary>Called on the audio thread ~20 times a second.</summary>
     private void OnLevels(LevelReport r)
     {
+        if (!metersVisible) return;
         Dispatcher.BeginInvoke(() =>
         {
             var now = DateTime.UtcNow;
@@ -113,15 +121,17 @@ public partial class MainWindow
 
             meterIn.Value = DbToPercent(r.InputDb);
             meterOut.Value = DbToPercent(r.OutputDb);
-            SetMeterWarning(meterIn, now < inputHotUntil,
+            SetMeterWarning(meterIn, ref inputWarningShown, now < inputHotUntil,
                 "Input is clipping — lower Mic gain (or the mic's own gain in Windows).");
-            SetMeterWarning(meterOut, now < outputLimitedUntil,
+            SetMeterWarning(meterOut, ref outputWarningShown, now < outputLimitedUntil,
                 "Output hit the limiter — it's being held under -1 dBFS so it won't distort, but you're louder than needed.");
         });
     }
 
-    private void SetMeterWarning(ProgressBar meter, bool warn, string why)
+    private void SetMeterWarning(ProgressBar meter, ref bool shown, bool warn, string why)
     {
+        if (warn == shown) return;
+        shown = warn;
         meter.Foreground = (Brush)FindResource(warn ? "ErrorBrush" : "MeterBrush");
         meter.ToolTip = warn ? why : null;
     }
@@ -137,6 +147,10 @@ public partial class MainWindow
         spectrumTimer.Start();
     }
 
+    private static readonly float[] SpectrumWindow = Enumerable.Range(0, SpectrumTapSampleProvider.WindowSize)
+        .Select(i => (float)FastFourierTransform.HannWindow(i, SpectrumTapSampleProvider.WindowSize))
+        .ToArray();
+
     private void UpdateSpectrum()
     {
         if (!IsVisible) return;
@@ -149,7 +163,7 @@ public partial class MainWindow
         int n = SpectrumTapSampleProvider.WindowSize;
         for (int i = 0; i < n; i++)
         {
-            spectrumFft[i].X = spectrumSamples[i] * (float)FastFourierTransform.HannWindow(i, n);
+            spectrumFft[i].X = spectrumSamples[i] * SpectrumWindow[i];
             spectrumFft[i].Y = 0f;
         }
         FastFourierTransform.FFT(true, 11, spectrumFft);

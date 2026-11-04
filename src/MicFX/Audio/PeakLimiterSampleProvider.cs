@@ -28,6 +28,7 @@ public class PeakLimiterSampleProvider : ISampleProvider
     private readonly float[] peaks;      // linked peak per frame, lookahead + 1 window
     private int delayPos;
     private int peakPos;
+    private int oversInWindow;           // peaks in the window above the ceiling
     private float gain = 1f;
     private float minGain = 1f;
 
@@ -71,12 +72,21 @@ public class PeakLimiterSampleProvider : ISampleProvider
             for (int ch = 0; ch < channels; ch++)
                 peak = MathF.Max(peak, MathF.Abs(buffer[f + ch]));
 
+            if (peaks[peakPos] > ceiling) oversInWindow--;
+            if (peak > ceiling) oversInWindow++;
             peaks[peakPos] = peak;
             peakPos = (peakPos + 1) % peaks.Length;
-            float windowMax = 0f;
-            foreach (var p in peaks) windowMax = MathF.Max(windowMax, p);
 
-            float target = windowMax > ceiling ? ceiling / windowMax : 1f;
+            // The exact window maximum only matters while something in the
+            // window is over the ceiling; otherwise the target is unity. So the
+            // window is scanned only then, which is almost never.
+            float target = 1f;
+            if (oversInWindow > 0)
+            {
+                float windowMax = 0f;
+                foreach (var p in peaks) windowMax = MathF.Max(windowMax, p);
+                target = ceiling / windowMax;
+            }
             float coef = target < gain ? attackCoef : releaseCoef;
             gain = target + (gain - target) * coef;
             if (gain < minGain) minGain = gain;

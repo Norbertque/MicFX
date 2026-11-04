@@ -12,18 +12,24 @@ public static class AudioDevices
     public static List<AudioDeviceInfo> GetCaptureDevices() => Enumerate(DataFlow.Capture);
     public static List<AudioDeviceInfo> GetRenderDevices() => Enumerate(DataFlow.Render);
 
+    // The COM wrappers are released right away rather than left to the
+    // finalizer: device lists are rebuilt on every device change.
     private static List<AudioDeviceInfo> Enumerate(DataFlow flow)
     {
-        var enumerator = new MMDeviceEnumerator();
+        using var enumerator = new MMDeviceEnumerator();
         var list = new List<AudioDeviceInfo>();
         foreach (var device in enumerator.EnumerateAudioEndPoints(flow, DeviceState.Active))
-            list.Add(new AudioDeviceInfo(device.ID, device.FriendlyName));
+        {
+            using (device)
+                list.Add(new AudioDeviceInfo(device.ID, device.FriendlyName));
+        }
         return list;
     }
 
+    /// <summary>Opens a device by id, for a stream or probe that keeps using it.</summary>
     public static MMDevice GetDevice(string id)
     {
-        var enumerator = new MMDeviceEnumerator();
+        using var enumerator = new MMDeviceEnumerator();
         return enumerator.GetDevice(id);
     }
 
@@ -58,12 +64,16 @@ public static class AudioDevices
         return list;
     }
 
-    public static string? GetDefaultRenderDeviceId()
+    public static string? GetDefaultRenderDeviceId() => GetDefaultDeviceId(DataFlow.Render);
+
+    public static string? GetDefaultCaptureDeviceId() => GetDefaultDeviceId(DataFlow.Capture);
+
+    private static string? GetDefaultDeviceId(DataFlow flow)
     {
-        var enumerator = new MMDeviceEnumerator();
-        return enumerator.HasDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia)
-            ? enumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia).ID
-            : null;
+        using var enumerator = new MMDeviceEnumerator();
+        if (!enumerator.HasDefaultAudioEndpoint(flow, Role.Multimedia)) return null;
+        using var device = enumerator.GetDefaultAudioEndpoint(flow, Role.Multimedia);
+        return device.ID;
     }
 
     /// <summary>
@@ -107,13 +117,5 @@ public static class AudioDevices
         int open = name.LastIndexOf('(');
         int close = name.LastIndexOf(')');
         return open >= 0 && close > open ? name[(open + 1)..close].Trim() : "";
-    }
-
-    public static string? GetDefaultCaptureDeviceId()
-    {
-        var enumerator = new MMDeviceEnumerator();
-        return enumerator.HasDefaultAudioEndpoint(DataFlow.Capture, Role.Multimedia)
-            ? enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Multimedia).ID
-            : null;
     }
 }
