@@ -14,6 +14,8 @@ public class SoundTile : INotifyPropertyChanged
     private bool isLooping;
     private string hotkeyLabel = "";
     private string? hotkeyWarning;
+    private bool isPlaying;
+    private double progress;
 
     public string Name { get => name; set => Set(ref name, value); }
     public string Path { get; set; } = "";
@@ -23,7 +25,18 @@ public class SoundTile : INotifyPropertyChanged
     public uint HotkeyMods { get; set; }
     public uint HotkeyVk { get; set; }
     public double? LoudnessLufs { get; set; }
+    /// <summary>Silent lead-in to skip; null until the clip has been analysed.</summary>
+    public double? StartSeconds { get; set; }
+    public bool SkipSilence { get; set; } = true;
     public int Index { get; set; }
+
+    /// <summary>Where playback starts: after the lead-in, if skipping is on and it was measured.</summary>
+    public double PlaybackStart => SkipSilence ? StartSeconds ?? 0 : 0;
+
+    public bool IsPlaying { get => isPlaying; set => Set(ref isPlaying, value); }
+
+    /// <summary>Playback position of the most recent play, 0..1.</summary>
+    public double Progress { get => progress; set => Set(ref progress, value); }
 
     public bool IsLooping
     {

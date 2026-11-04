@@ -76,7 +76,7 @@ public partial class MainWindow : Window
         StartSpectrumTimer();
         TryAutoStart();
         CheckCableSetup();
-        MeasureUnmeasuredClips();
+        PrepareClips();
         _ = CheckForUpdatesAsync();
         if (Environment.GetCommandLineArgs().Contains("--updated"))
             txtStatus.Text = $"Updated to v{version.Major}.{version.Minor}.{version.Build} ✓";

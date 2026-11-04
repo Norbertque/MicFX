@@ -23,6 +23,9 @@
                 ValueChanged="Volume_Changed" Margin="0,2,0,10"/>
 
         <CheckBox x:Name="chkLoop" Content="Loop until stopped (click the tile again to stop)"
+                  Margin="0,0,0,8"/>
+        <CheckBox x:Name="chkSkipSilence" Content="Skip silence at the start"
+                  ToolTip="Starts playback where the sound begins, so the clip reacts instantly. Measured once when the clip is added."
                   Margin="0,0,0,10"/>
 
         <TextBlock Text="Hotkey — click the box, then press a combination (Esc resets)"

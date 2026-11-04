@@ -80,10 +80,12 @@ public sealed class LoudnessMeter
         (float)Math.Pow(10.0, Math.Min(TargetLufs - lufs, MaxBoostDb) / 20.0);
 
     /// <summary>
-    /// Measures a file as it will be played: resampled to 48 kHz, mono
-    /// duplicated to both channels. Null when unreadable, silent or not mono/stereo.
+    /// Reads a file once, as it will be played (resampled to 48 kHz, mono
+    /// duplicated to both channels), and returns its loudness and where its
+    /// sound starts. Null when unreadable or not mono/stereo; Lufs is null for
+    /// silence.
     /// </summary>
-    public static double? MeasureFile(string path)
+    public static ClipAnalysis? AnalyzeFile(string path)
     {
         try
         {
@@ -94,17 +96,24 @@ public sealed class LoudnessMeter
             if (p.WaveFormat.Channels == 1) p = new MonoToStereoSampleProvider(p);
 
             var meter = new LoudnessMeter();
+            var leadIn = new LeadingSilence();
             var buffer = new float[SampleRate]; // 0.5 s stereo
             int n;
             while ((n = p.Read(buffer, 0, buffer.Length)) > 0)
+            {
                 meter.Add(buffer, n);
-            return meter.IntegratedLufs();
+                leadIn.Add(buffer, n);
+            }
+            return new ClipAnalysis(meter.IntegratedLufs(), leadIn.StartSeconds());
         }
         catch
         {
             return null;
         }
     }
+
+    /// <summary>Integrated loudness of a file as it will be played; null when unreadable or silent.</summary>
+    public static double? MeasureFile(string path) => AnalyzeFile(path)?.Lufs;
 
     /// <summary>Direct-form I biquad in double precision (K-weighting coefficients are for 48 kHz).</summary>
     private sealed class Biquad
@@ -131,5 +140,56 @@ public sealed class LoudnessMeter
             y2 = y1; y1 = y;
             return y;
         }
+    }
+}
+
+/// <summary>A clip's loudness (null for silence) and the time its sound starts.</summary>
+public readonly record struct ClipAnalysis(double? Lufs, double StartSeconds);
+
+/// <summary>
+/// Finds where the sound in a clip starts, so playback can skip a silent
+/// lead-in (downloaded clips often have one). The start is the first 1 ms
+/// block whose peak reaches 40 dB below the clip's peak, and at least
+/// -60 dBFS, minus 20 ms so the attack is kept. Lead-ins shorter than 50 ms
+/// are left alone: not noticeable as a delay, and compressed formats can only
+/// seek to within about a frame (~26 ms) anyway. Expects interleaved stereo
+/// at 48 kHz.
+/// </summary>
+public sealed class LeadingSilence
+{
+    private const int BlockFrames = LoudnessMeter.SampleRate / 1000;
+    private const double PreRollSeconds = 0.020;
+    private const double MinSkipSeconds = 0.050;
+    private const float AbsoluteFloor = 0.001f;   // -60 dBFS
+    private const float BelowPeak = 0.01f;        // -40 dB
+
+    private readonly List<float> blockPeaks = new();
+    private float blockPeak;
+    private int framesInBlock;
+
+    public void Add(float[] interleavedStereo, int count)
+    {
+        for (int i = 0; i + 1 < count; i += 2)
+        {
+            blockPeak = Math.Max(blockPeak, Math.Max(Math.Abs(interleavedStereo[i]), Math.Abs(interleavedStereo[i + 1])));
+            if (++framesInBlock == BlockFrames)
+            {
+                blockPeaks.Add(blockPeak);
+                blockPeak = 0;
+                framesInBlock = 0;
+            }
+        }
+    }
+
+    /// <summary>Seconds to skip at the start; 0 when there is no (noticeable) silent lead-in.</summary>
+    public double StartSeconds()
+    {
+        var peaks = framesInBlock > 0 ? blockPeaks.Append(blockPeak).ToList() : blockPeaks;
+        if (peaks.Count == 0) return 0;
+        float threshold = Math.Max(AbsoluteFloor, peaks.Max() * BelowPeak);
+        int first = peaks.FindIndex(p => p >= threshold);
+        if (first < 0) return 0;
+        double start = first / 1000.0 - PreRollSeconds;
+        return start >= MinSkipSeconds ? start : 0;
     }
 }

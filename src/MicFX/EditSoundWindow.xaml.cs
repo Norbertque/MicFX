@@ -13,15 +13,19 @@ public partial class EditSoundWindow : Window
     public string SoundName => txtName.Text.Trim();
     public float ClipVolume => (float)sliderVolume.Value;
     public bool Loop => chkLoop.IsChecked == true;
+    public bool SkipSilence => chkSkipSilence.IsChecked == true;
     /// <summary>Custom hotkey; 0/0 means the tile uses its default.</summary>
     public uint HotkeyMods { get; private set; }
     public uint HotkeyVk { get; private set; }
 
     private readonly (uint Mods, uint Vk) defaultHotkey;
-    private readonly Action<float>? preview;
+    private readonly Action<float, bool>? preview;
 
+    /// <param name="startSeconds">Measured silent lead-in; null if not analysed yet.</param>
+    /// <param name="preview">Plays the clip with (volume, skip silence).</param>
     public EditSoundWindow(Window owner, string name, float volume, bool loop,
-        uint hotkeyMods, uint hotkeyVk, (uint Mods, uint Vk) defaultHotkey, Action<float>? preview)
+        uint hotkeyMods, uint hotkeyVk, (uint Mods, uint Vk) defaultHotkey,
+        bool skipSilence, double? startSeconds, Action<float, bool>? preview)
     {
         InitializeComponent();
         Owner = owner;
@@ -30,6 +34,13 @@ public partial class EditSoundWindow : Window
         txtName.Text = name;
         sliderVolume.Value = volume;
         chkLoop.IsChecked = loop;
+        chkSkipSilence.IsChecked = skipSilence;
+        chkSkipSilence.Content = startSeconds switch
+        {
+            null => "Skip silence at the start (not measured yet)",
+            0 => "Skip silence at the start (none found)",
+            double s => $"Skip silence at the start ({s:0.00} s)"
+        };
         HotkeyMods = hotkeyMods;
         HotkeyVk = hotkeyVk;
         ShowHotkey();
@@ -77,7 +88,7 @@ public partial class EditSoundWindow : Window
         lblHotkeyHint.Text = warning == null ? "" : "⚠ " + warning;
     }
 
-    private void Preview_Click(object sender, RoutedEventArgs e) => preview?.Invoke(ClipVolume);
+    private void Preview_Click(object sender, RoutedEventArgs e) => preview?.Invoke(ClipVolume, SkipSilence);
 
     private void Ok_Click(object sender, RoutedEventArgs e)
     {

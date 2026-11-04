@@ -2,7 +2,9 @@ using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Threading;
 using MicFX.Audio;
+using MicFX.Models;
 using Microsoft.Win32;
 
 namespace MicFX;
@@ -10,8 +12,16 @@ namespace MicFX;
 public partial class MainWindow
 {
     private readonly Dictionary<SoundTile, object> loopingClips = new();
+    // Every clip that is playing, oldest first: the newest play of a tile drives its progress bar.
+    private readonly List<(object Handle, SoundTile Tile)> playingClips = new();
+    private DispatcherTimer? progressTimer;
+    private readonly SoundLibrary library = SoundLibrary.Default;
+    private readonly object libraryLock = new();
     private HotkeyManager? hotkeys;
     private const int StopAllHotkeyId = 900; // tile hotkeys use their index, 0..n-1
+
+    /// <summary>Formats the Add dialog offers and drag and drop accepts.</summary>
+    private static readonly string[] AudioExtensions = { ".wav", ".mp3", ".m4a", ".wma", ".aiff", ".aif" };
 
     // ---------- soundboard volume ----------
 
@@ -21,45 +31,132 @@ public partial class MainWindow
         engine.SetSoundboardVolume((float)e.NewValue);
     }
 
-    // ---------- soundboard ----------
+    // ---------- adding clips ----------
 
     private void AddSound_Click(object sender, RoutedEventArgs e)
     {
         var dialog = new OpenFileDialog
         {
-            Filter = "Audio files|*.wav;*.mp3;*.m4a;*.wma;*.aiff;*.aif|All files|*.*",
+            Filter = $"Audio files|{string.Join(";", AudioExtensions.Select(x => "*" + x))}|All files|*.*",
             Multiselect = true
         };
-        if (dialog.ShowDialog() != true) return;
+        if (dialog.ShowDialog() == true)
+            AddSounds(dialog.FileNames);
+    }
 
-        foreach (var path in dialog.FileNames)
+    private void AddSounds(IEnumerable<string> paths)
+    {
+        int added = 0;
+        foreach (var path in paths)
         {
             sounds.Add(new SoundTile
             {
                 Name = System.IO.Path.GetFileNameWithoutExtension(path),
                 Path = path
             });
+            added++;
         }
+        if (added == 0) return;
         RefreshTileIndexes();
         RefreshHotkeys();
-        MeasureUnmeasuredClips();
+        PrepareClips();
     }
 
-    /// <summary>
-    /// Measures the loudness of any clip that has not been measured yet, off
-    /// the UI thread (a long file takes a moment to read), then saves. Runs at
-    /// startup for clips added by older versions and after adding new ones.
-    /// </summary>
-    private void MeasureUnmeasuredClips()
+    private static bool IsAudioFile(string path) =>
+        AudioExtensions.Contains(System.IO.Path.GetExtension(path), StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Dropped audio files, plus the audio files directly inside dropped folders.</summary>
+    private static List<string> DroppedAudioFiles(IDataObject data)
     {
-        var pending = sounds.Where(t => t.LoudnessLufs == null && File.Exists(t.Path)).ToList();
+        var files = new List<string>();
+        if (data.GetData(DataFormats.FileDrop) is not string[] items) return files;
+        foreach (var item in items)
+        {
+            if (Directory.Exists(item))
+                files.AddRange(Directory.EnumerateFiles(item).Where(IsAudioFile)
+                    .OrderBy(f => f, StringComparer.OrdinalIgnoreCase));
+            else if (IsAudioFile(item))
+                files.Add(item);
+        }
+        return files;
+    }
+
+    private void Soundboard_DragOver(object sender, DragEventArgs e)
+    {
+        bool files = e.Data.GetDataPresent(DataFormats.FileDrop);
+        e.Effects = files ? DragDropEffects.Copy : DragDropEffects.None;
+        dropHint.Visibility = files ? Visibility.Visible : Visibility.Collapsed;
+        e.Handled = true;
+    }
+
+    private void Soundboard_DragLeave(object sender, DragEventArgs e)
+    {
+        // DragLeave also fires when moving between the tiles: only hide the
+        // hint once the pointer has really left the soundboard.
+        var p = e.GetPosition(soundboardBox);
+        if (p.X <= 0 || p.Y <= 0 || p.X >= soundboardBox.ActualWidth || p.Y >= soundboardBox.ActualHeight)
+            dropHint.Visibility = Visibility.Collapsed;
+    }
+
+    private void Soundboard_Drop(object sender, DragEventArgs e)
+    {
+        dropHint.Visibility = Visibility.Collapsed;
+        e.Handled = true;
+        var files = DroppedAudioFiles(e.Data);
+        if (files.Count == 0)
+        {
+            txtStatus.Text = $"Nothing to add: the soundboard takes {string.Join(", ", AudioExtensions)} files.";
+            return;
+        }
+        AddSounds(files);
+    }
+
+    // ---------- clip upkeep ----------
+
+    /// <summary>
+    /// Background upkeep, once per clip: copies it into MicFX's library (so
+    /// moving or deleting the original doesn't break the tile) and analyses
+    /// it for loudness matching and the silent lead-in. Runs at startup, which
+    /// also covers clips added by older versions, and after adding clips;
+    /// saves when done.
+    /// </summary>
+    private void PrepareClips()
+    {
+        var pending = sounds
+            .Where(t => File.Exists(t.Path)
+                        && (!library.Contains(t.Path) || t.LoudnessLufs == null || t.StartSeconds == null))
+            .Select(t => (Tile: t, Path: t.Path, Analyse: t.LoudnessLufs == null || t.StartSeconds == null))
+            .ToList();
         if (pending.Count == 0) return;
         Task.Run(() =>
         {
-            foreach (var tile in pending)
+            foreach (var (tile, path, analyse) in pending)
             {
-                double? lufs = LoudnessMeter.MeasureFile(tile.Path);
-                Dispatcher.BeginInvoke(() => tile.LoudnessLufs = lufs);
+                string copy = path;
+                try
+                {
+                    lock (libraryLock) copy = library.Import(path);
+                }
+                catch
+                {
+                    // Disk full, file locked...: keep playing the original.
+                }
+                var analysis = analyse ? LoudnessMeter.AnalyzeFile(copy) : null;
+                Dispatcher.BeginInvoke(() =>
+                {
+                    if (!sounds.Contains(tile))
+                    {
+                        // Removed while this ran: drop the copy unless another tile uses it.
+                        if (copy != path) ReleaseCopy(copy);
+                        return;
+                    }
+                    if (tile.Path == path) tile.Path = copy;
+                    if (analysis is { } a)
+                    {
+                        tile.LoudnessLufs = a.Lufs;
+                        tile.StartSeconds = a.StartSeconds;
+                    }
+                });
             }
             Dispatcher.BeginInvoke(() =>
             {
@@ -67,6 +164,20 @@ public partial class MainWindow
                 settings.Save();
             });
         });
+    }
+
+    /// <summary>Deletes a library copy that no tile plays any more.</summary>
+    private void ReleaseCopy(string path)
+    {
+        if (sounds.Any(t => string.Equals(t.Path, path, StringComparison.OrdinalIgnoreCase))) return;
+        try
+        {
+            lock (libraryLock) library.Release(path);
+        }
+        catch
+        {
+            // Still open somewhere: it stays, unused.
+        }
     }
 
     /// <summary>Clip volume including loudness matching, when that is on and the clip is measured.</summary>
@@ -79,16 +190,19 @@ public partial class MainWindow
     {
         if (initializing) return;
         settings.MatchClipLoudness = chkMatchLoudness.IsChecked == true;
-        if (settings.MatchClipLoudness) MeasureUnmeasuredClips();
+        if (settings.MatchClipLoudness) PrepareClips();
     }
+
+    // ---------- editing and removing ----------
 
     private void EditSound_Click(object sender, RoutedEventArgs e)
     {
         if ((sender as MenuItem)?.Tag is not SoundTile tile) return;
 
         var dialog = new EditSoundWindow(this, tile.Name, tile.Volume, tile.Loop,
-            tile.HotkeyMods, tile.HotkeyVk, DefaultHotkey(tile.Index),
-            preview: volume => TryPreview(tile.Path, EffectiveVolume(tile, volume)));
+            tile.HotkeyMods, tile.HotkeyVk, DefaultHotkey(tile.Index), tile.SkipSilence, tile.StartSeconds,
+            preview: (volume, skipSilence) => TryPreview(tile.Path, EffectiveVolume(tile, volume),
+                skipSilence ? tile.StartSeconds ?? 0 : 0));
         // Released while the dialog is open, so pressing an existing hotkey in
         // the hotkey box records it instead of playing a sound.
         hotkeys?.Clear();
@@ -101,11 +215,12 @@ public partial class MainWindow
             tile.Loop = dialog.Loop;
             tile.HotkeyMods = dialog.HotkeyMods;
             tile.HotkeyVk = dialog.HotkeyVk;
+            tile.SkipSilence = dialog.SkipSilence;
         }
         RefreshHotkeys();
     }
 
-    private void TryPreview(string path, float volume)
+    private void TryPreview(string path, float volume, double startSeconds)
     {
         if (!File.Exists(path))
         {
@@ -117,7 +232,7 @@ public partial class MainWindow
             var device = comboMonitor.SelectedItem is AudioDeviceInfo info
                 ? AudioDevices.GetDevice(info.Id)
                 : null;
-            engine.PreviewClip(path, volume, device);
+            engine.PreviewClip(path, volume, device, startSeconds);
         }
         catch (Exception ex)
         {
@@ -127,15 +242,19 @@ public partial class MainWindow
 
     private void RemoveSound_Click(object sender, RoutedEventArgs e)
     {
-        if ((sender as MenuItem)?.Tag is SoundTile tile)
-        {
-            if (loopingClips.TryGetValue(tile, out var handle))
-                engine.StopClip(handle);
-            sounds.Remove(tile);
-            RefreshTileIndexes();
-            RefreshHotkeys();
-        }
+        if ((sender as MenuItem)?.Tag is not SoundTile tile) return;
+        // Stop it first: a playing clip keeps its file open.
+        foreach (var (handle, _) in playingClips.Where(c => c.Tile == tile).ToList())
+            engine.StopClip(handle);
+        sounds.Remove(tile);
+        ReleaseCopy(tile.Path);
+        RefreshTileIndexes();
+        RefreshHotkeys();
+        CollectSettings();
+        settings.Save();
     }
+
+    // ---------- playback ----------
 
     private void SoundTile_Click(object sender, RoutedEventArgs e)
     {
@@ -178,8 +297,13 @@ public partial class MainWindow
         }
         try
         {
-            var handle = engine.PlayClip(tile.Path, EffectiveVolume(tile, tile.Volume), tile.Loop);
-            if (tile.Loop && handle != null)
+            var handle = engine.PlayClip(tile.Path, EffectiveVolume(tile, tile.Volume), tile.Loop, tile.PlaybackStart);
+            if (handle == null) return;
+            playingClips.Add((handle, tile));
+            tile.Progress = 0;
+            tile.IsPlaying = true;
+            StartProgressTimer();
+            if (tile.Loop)
             {
                 loopingClips[tile] = handle;
                 tile.IsLooping = true;
@@ -195,6 +319,17 @@ public partial class MainWindow
     {
         Dispatcher.BeginInvoke(() =>
         {
+            int index = playingClips.FindIndex(c => ReferenceEquals(c.Handle, handle));
+            if (index >= 0)
+            {
+                var tile = playingClips[index].Tile;
+                playingClips.RemoveAt(index);
+                if (!playingClips.Any(c => c.Tile == tile))
+                {
+                    tile.IsPlaying = false;
+                    tile.Progress = 0;
+                }
+            }
             var entry = loopingClips.FirstOrDefault(kv => ReferenceEquals(kv.Value, handle));
             if (entry.Key != null)
             {
@@ -202,6 +337,32 @@ public partial class MainWindow
                 loopingClips.Remove(entry.Key);
             }
         });
+    }
+
+    private void StartProgressTimer()
+    {
+        if (progressTimer == null)
+        {
+            progressTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(66) };
+            progressTimer.Tick += (_, _) => UpdateProgress();
+        }
+        progressTimer.Start();
+    }
+
+    /// <summary>Moves the progress bars (~15 fps); the timer stops itself when nothing plays.</summary>
+    private void UpdateProgress()
+    {
+        if (playingClips.Count == 0)
+        {
+            progressTimer?.Stop();
+            return;
+        }
+        if (!IsVisible) return;
+        foreach (var (handle, tile) in playingClips) // newest last, so it wins
+        {
+            if (engine.ClipProgress(handle) is double progress)
+                tile.Progress = progress;
+        }
     }
 
     private void RefreshTileIndexes()

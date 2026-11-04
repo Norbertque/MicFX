@@ -331,7 +331,10 @@
             </GroupBox>
 
             <!-- Right bottom: soundboard strip -->
-            <GroupBox Grid.Column="1" Grid.Row="1" Header="SOUNDBOARD" Margin="0,10,0,0">
+            <!-- Audio files (or folders) dropped anywhere on the soundboard are added. -->
+            <GroupBox x:Name="soundboardBox" Grid.Column="1" Grid.Row="1" Header="SOUNDBOARD" Margin="0,10,0,0"
+                      AllowDrop="True" DragEnter="Soundboard_DragOver" DragOver="Soundboard_DragOver"
+                      DragLeave="Soundboard_DragLeave" Drop="Soundboard_Drop">
                 <DockPanel>
                     <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6" LastChildFill="True">
                         <Button DockPanel.Dock="Left" Content="＋ Add sound…" Click="AddSound_Click"/>
@@ -348,6 +351,7 @@
                                    Foreground="{StaticResource SubtleTextBrush}"
                                    ToolTip="Hotkeys: the first nine tiles play with Ctrl+Alt+1 to 9 unless you set your own (right-click a tile, Edit). The stop-all hotkey is in the settings menu. You can also drop audio files here to add them."/>
                     </DockPanel>
+                    <Grid>
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                         <ItemsControl x:Name="icSounds">
                             <ItemsControl.ItemsPanel>
@@ -361,12 +365,23 @@
                                             Style="{StaticResource TileButton}"
                                             Click="SoundTile_Click" Tag="{Binding}"
                                             ToolTip="{Binding HotkeyWarning}">
-                                        <StackPanel>
-                                            <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"
-                                                       TextAlignment="Center" MaxWidth="112"/>
-                                            <TextBlock Text="{Binding StatusLabel}" FontSize="10" TextAlignment="Center"
-                                                       Foreground="{StaticResource SubtleTextBrush}"/>
-                                        </StackPanel>
+                                        <Grid Width="114" Height="50">
+                                            <StackPanel VerticalAlignment="Center" Margin="0,0,0,4">
+                                                <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis"
+                                                           TextAlignment="Center" MaxWidth="112"/>
+                                                <TextBlock Text="{Binding StatusLabel}" FontSize="10" TextAlignment="Center"
+                                                           Foreground="{StaticResource SubtleTextBrush}"/>
+                                            </StackPanel>
+                                            <!-- Playback progress of the newest play of this clip -->
+                                            <Border Height="3" CornerRadius="1.5" VerticalAlignment="Bottom"
+                                                    Background="{DynamicResource AccentBrush}"
+                                                    RenderTransformOrigin="0,0.5"
+                                                    Visibility="{Binding IsPlaying, Converter={StaticResource BoolToVisibility}}">
+                                                <Border.RenderTransform>
+                                                    <ScaleTransform ScaleX="{Binding Progress}"/>
+                                                </Border.RenderTransform>
+                                            </Border>
+                                        </Grid>
                                         <Button.ContextMenu>
                                             <ContextMenu>
                                                 <MenuItem Header="Edit…" Click="EditSound_Click" Tag="{Binding}"/>
@@ -378,6 +393,14 @@
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
                     </ScrollViewer>
+                    <Grid x:Name="dropHint" Visibility="Collapsed" IsHitTestVisible="False">
+                        <Rectangle RadiusX="8" RadiusY="8" StrokeThickness="2" StrokeDashArray="4 3"
+                                   Stroke="{DynamicResource AccentBrush}" Fill="{DynamicResource AccentDimBrush}"
+                                   Opacity="0.92"/>
+                        <TextBlock Text="Drop audio files to add them" FontSize="14" FontWeight="SemiBold"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Grid>
+                    </Grid>
                 </DockPanel>
             </GroupBox>
         </Grid>

@@ -22,6 +22,7 @@
 
   <ItemGroup>
     <Compile Include="../../src/MicFX/Audio/*.cs" Exclude="../../src/MicFX/Audio/AudioEngine.cs" LinkBase="Audio" />
+    <Compile Include="../../src/MicFX/Models/SoundLibrary.cs" Link="Models/SoundLibrary.cs" />
   </ItemGroup>
 
   <ItemGroup>

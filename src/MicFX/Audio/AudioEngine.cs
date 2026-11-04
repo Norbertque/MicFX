@@ -55,7 +55,8 @@ public class AudioEngine : IDisposable
     private TeeSampleProvider? voiceTee;
     private TeeSampleProvider? soundTee;
 
-    private readonly List<(ISampleProvider Tail, AudioFileReader Reader)> activeClips = new();
+    // StartPosition: where playback began (after a skipped lead-in), for progress.
+    private readonly List<(ISampleProvider Tail, AudioFileReader Reader, long StartPosition)> activeClips = new();
     private readonly object clipLock = new();
 
     // Last known parameters, applied on the next Start() when the graph is down.
@@ -517,7 +518,12 @@ public class AudioEngine : IDisposable
     // ---------- soundboard ----------
 
     /// <summary>Starts a clip into the mic mix. Returns an opaque handle usable with StopClip.</summary>
-    public object? PlayClip(string path, float volume, bool loop)
+    /// <summary>
+    /// Starts a clip in the soundboard mix. <paramref name="startSeconds"/>
+    /// skips a silent lead-in; loops return to that point. Returns a handle
+    /// for StopClip/ClipProgress.
+    /// </summary>
+    public object? PlayClip(string path, float volume, bool loop, double startSeconds = 0)
     {
         if (!IsRunning || soundMixer == null) return null;
 
@@ -527,6 +533,9 @@ public class AudioEngine : IDisposable
             reader.Dispose();
             throw new NotSupportedException("Only mono/stereo audio files are supported.");
         }
+        if (startSeconds > 0 && startSeconds < reader.TotalTime.TotalSeconds)
+            reader.CurrentTime = TimeSpan.FromSeconds(startSeconds);
+        long startPosition = reader.Position;
 
         ISampleProvider clip = reader;
         if (clip.WaveFormat.SampleRate != SampleRate)
@@ -534,11 +543,11 @@ public class AudioEngine : IDisposable
         if (clip.WaveFormat.Channels == 1)
             clip = new MonoToStereoSampleProvider(clip);
         if (loop)
-            clip = new LoopingSampleProvider(clip, reader);
+            clip = new LoopingSampleProvider(clip, reader, startPosition);
         var tail = new VolumeSampleProvider(clip) { Volume = volume };
 
         lock (clipLock)
-            activeClips.Add((tail, reader));
+            activeClips.Add((tail, reader, startPosition));
         soundMixer.AddMixerInput((ISampleProvider)tail);
         return tail;
     }
@@ -576,11 +585,11 @@ public class AudioEngine : IDisposable
 
     public void StopAllClips()
     {
-        List<(ISampleProvider Tail, AudioFileReader Reader)> stopped;
+        List<(ISampleProvider Tail, AudioFileReader Reader, long StartPosition)> stopped;
         soundMixer?.RemoveAllMixerInputs();
         lock (clipLock)
         {
-            stopped = new List<(ISampleProvider, AudioFileReader)>(activeClips);
+            stopped = new List<(ISampleProvider, AudioFileReader, long)>(activeClips);
             foreach (var clip in activeClips)
                 clip.Reader.Dispose();
             activeClips.Clear();
@@ -590,13 +599,34 @@ public class AudioEngine : IDisposable
     }
 
     /// <summary>
+    /// How far a playing clip has got, 0..1 (from where it started; loops
+    /// wrap around), or null once it has ended. The reader runs slightly ahead
+    /// of what is audible, which doesn't matter for a progress bar.
+    /// </summary>
+    public double? ClipProgress(object handle)
+    {
+        lock (clipLock)
+        {
+            foreach (var (tail, reader, start) in activeClips)
+            {
+                if (!ReferenceEquals(tail, handle)) continue;
+                long span = reader.Length - start;
+                return span > 0 ? Math.Clamp((double)(reader.Position - start) / span, 0, 1) : 1;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>
     /// Plays a clip to the monitor/default device only — never into the mic
     /// mix. Works even when the engine is stopped.
     /// </summary>
-    public void PreviewClip(string path, float volume, MMDevice? device)
+    public void PreviewClip(string path, float volume, MMDevice? device, double startSeconds = 0)
     {
         StopPreview();
         previewReader = new AudioFileReader(path) { Volume = volume };
+        if (startSeconds > 0 && startSeconds < previewReader.TotalTime.TotalSeconds)
+            previewReader.CurrentTime = TimeSpan.FromSeconds(startSeconds);
         var target = device ?? GetDefaultRender();
         if (target == null)
         {
@@ -667,13 +697,16 @@ internal class LoopingSampleProvider : ISampleProvider
 {
     private readonly ISampleProvider source;
     private readonly AudioFileReader reader;
+    private readonly long loopStart;
 
     public WaveFormat WaveFormat => source.WaveFormat;
 
-    public LoopingSampleProvider(ISampleProvider source, AudioFileReader reader)
+    /// <param name="loopStart">Reader position each loop starts from (after a skipped lead-in).</param>
+    public LoopingSampleProvider(ISampleProvider source, AudioFileReader reader, long loopStart = 0)
     {
         this.source = source;
         this.reader = reader;
+        this.loopStart = loopStart;
     }
 
     public int Read(float[] buffer, int offset, int count)
@@ -684,8 +717,8 @@ internal class LoopingSampleProvider : ISampleProvider
             int n = source.Read(buffer, offset + total, count - total);
             if (n == 0)
             {
-                if (reader.Position == 0) break; // empty/unreadable file — don't spin
-                reader.Position = 0;
+                if (reader.Position == loopStart) break; // nothing left to play — don't spin
+                reader.Position = loopStart;
                 continue;
             }
             total += n;

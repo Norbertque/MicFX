@@ -14,6 +14,9 @@ public class SoundClipSetting
     public string? HotkeyText { get; set; }
     /// <summary>Integrated loudness (BS.1770), measured once; null until measured.</summary>
     public double? LoudnessLufs { get; set; }
+    /// <summary>Seconds of silent lead-in to skip, measured once; null until measured.</summary>
+    public double? StartSeconds { get; set; }
+    public bool SkipSilence { get; set; } = true;
 }
 
 /// <summary>A named snapshot of the sound-shaping settings (not devices, not soundboard).</summary>
