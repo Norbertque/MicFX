@@ -37,6 +37,7 @@ public class Profile
 public class AppSettings
 {
     public string? InputDeviceId { get; set; }
+    public string? InputDeviceName { get; set; }
     /// <summary>Optional mic that takes over automatically whenever it is connected.</summary>
     public string? PreferredInputDeviceId { get; set; }
     /// <summary>Friendly name of the above, so it can still be shown while unplugged.</summary>

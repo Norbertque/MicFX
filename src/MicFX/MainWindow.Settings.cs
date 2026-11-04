@@ -77,7 +77,9 @@ public partial class MainWindow
 
     private void CollectSettings()
     {
-        settings.InputDeviceId = (comboMic.SelectedItem as AudioDeviceInfo)?.Id;
+        var mic = comboMic.SelectedItem as AudioDeviceInfo;
+        settings.InputDeviceId = mic?.Id;
+        settings.InputDeviceName = mic == null ? null : DeviceName(mic);
         if (comboMicPreferred.SelectedItem is AudioDeviceInfo preferred && preferred.Id.Length > 0)
         {
             settings.PreferredInputDeviceId = preferred.Id;

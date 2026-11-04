@@ -22,6 +22,9 @@ public partial class MainWindow
     private readonly MicActivityProbe probe = new();
     private string? activeInputId;
     private string runningStatus = "";
+    // The user wants the engine running, but the chosen mic is unplugged (or
+    // not up yet after boot): it starts as soon as the device is back.
+    private bool waitingForMic;
 
     // Monitor recovery: a failed or missing headphone device is retried by
     // EnsureMonitor, but not more often than this allows.
@@ -45,11 +48,14 @@ public partial class MainWindow
                           ?? settings.MonitorDeviceId
                           ?? AudioDevices.GetDefaultRenderDeviceId();
 
+        // The device lists keep a remembered device even while it is unplugged
+        // or switched off ("(not connected)"), so the choice survives until it
+        // is back instead of falling to whatever Windows uses by default.
         var captureDevices = AudioDevices.GetCaptureDevices();
-        comboMic.ItemsSource = captureDevices;
+        comboMic.ItemsSource = AudioDevices.WithRemembered(captureDevices, selectedMic, settings.InputDeviceName);
+        if (captureDevices.FirstOrDefault(d => d.Id == selectedMic) is { } micDevice)
+            settings.InputDeviceName = micDevice.Name;
 
-        // The auto-switch and monitor lists keep a remembered device even while
-        // it is unplugged or switched off, so the choice survives until it is back.
         comboMicPreferred.ItemsSource = AudioDevices.WithRemembered(
             captureDevices.Prepend(NoDevice), selectedPreferred, settings.PreferredInputDeviceName);
 
@@ -68,7 +74,7 @@ public partial class MainWindow
         if (comboMicPreferred.SelectedItem == null)
             comboMicPreferred.SelectedItem = NoDevice;
 
-        if (comboMic.SelectedItem == null)
+        if (comboMic.SelectedItem == null) // first run: nothing remembered yet
             SelectById(comboMic, AudioDevices.GetDefaultCaptureDeviceId());
 
         initializing = wasInitializing;
@@ -169,7 +175,10 @@ public partial class MainWindow
         }
         if (ResolveInputDevice() is not AudioDeviceInfo mic)
         {
-            txtStatus.Text = "Select a microphone first.";
+            if (comboMic.SelectedItem is AudioDeviceInfo wanted)
+                WaitForMic($"Waiting for {DeviceName(wanted)}: MicFX starts when it's connected.");
+            else
+                txtStatus.Text = "Select a microphone first.";
             return;
         }
 
@@ -184,6 +193,7 @@ public partial class MainWindow
         try
         {
             engine.Start(AudioDevices.GetDevice(mic.Id), AudioDevices.GetDevice(render.Id));
+            waitingForMic = false;
             activeInputId = mic.Id;
             UpdateProbe();
             ApplyMonitor();
@@ -197,11 +207,29 @@ public partial class MainWindow
         catch (Exception ex)
         {
             engine.Stop();
+            waitingForMic = false;
             activeInputId = null;
             btnStartStop.Content = "Start";
             SetStatusDot("error");
             txtStatus.Text = "Error: " + ex.Message;
         }
+    }
+
+    /// <summary>
+    /// Stops the graph but keeps the intent to run: OnDevicesChanged starts it
+    /// again when the mic is back, and the Stop button cancels the wait.
+    /// </summary>
+    private void WaitForMic(string status)
+    {
+        engine.Stop();
+        waitingForMic = true;
+        activeInputId = null;
+        UpdateProbe();
+        btnStartStop.Content = "Stop";
+        SetStatusDot("idle");
+        txtStatus.Text = status;
+        meterIn.Value = 0;
+        meterOut.Value = 0;
     }
 
     /// <summary>Colours the header dot: running, stopped or failed.</summary>
@@ -250,11 +278,20 @@ public partial class MainWindow
     private void OnDevicesChanged()
     {
         PopulateDevices();
-        if (!engine.IsRunning) return;
+        if (!engine.IsRunning)
+        {
+            if (waitingForMic) StartEngine(); // starts if the mic is back, else keeps waiting
+            return;
+        }
 
         var chosen = ResolveInputDevice();
         if (chosen == null)
         {
+            if (comboMic.SelectedItem is AudioDeviceInfo mic)
+            {
+                WaitForMic($"{DeviceName(mic)} disconnected: MicFX resumes when it's back.");
+                return;
+            }
             StopEngine();
             txtStatus.Text = "Microphone disconnected.";
             return;
@@ -268,6 +305,7 @@ public partial class MainWindow
     private void StopEngine()
     {
         engine.Stop();
+        waitingForMic = false;
         btnStartStop.Content = "Start";
         SetStatusDot("idle");
         txtStatus.Text = "Stopped";
@@ -277,7 +315,7 @@ public partial class MainWindow
 
     private void RestartIfRunning()
     {
-        if (engine.IsRunning) StartEngine();
+        if (engine.IsRunning || waitingForMic) StartEngine();
     }
 
     private void ApplyMonitor()
@@ -385,7 +423,7 @@ public partial class MainWindow
 
     private void StartStop_Click(object sender, RoutedEventArgs e)
     {
-        if (engine.IsRunning) StopEngine();
+        if (engine.IsRunning || waitingForMic) StopEngine();
         else StartEngine();
     }
 
