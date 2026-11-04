@@ -28,9 +28,19 @@ mic -> gain -> noise suppression -> gate -> EQ -> compressor
 - Compressor ("voice leveler") with automatic make-up gain, which lifts the
   voice but not the silence between words
 - Soundboard mixed into the mic stream: per-clip volume, loop mode, custom
-  global hotkeys (Ctrl+Alt+1..9 by default), headphone-only preview
+  global hotkeys (Ctrl+Alt+1..9 by default, Ctrl+Alt+0 stops everything),
+  headphone-only preview, progress bars on playing clips. Add clips with the
+  Add button or by dropping files or folders onto the soundboard; MicFX keeps
+  its own copy of each (`%APPDATA%\MicFX\Sounds`), so moving or deleting the
+  original does not break the tile. Silent lead-ins are skipped, so clips
+  react instantly
+- Hotkey labels show keys as printed on your keyboard layout, and MicFX warns
+  when a Ctrl+Alt hotkey also blocks typing an AltGr character (Windows treats
+  Ctrl+Alt as AltGr, e.g. Ctrl+Alt+1 is AltGr+1 = ~ on a Czech keyboard)
 - Profiles for saving and switching complete configurations, also from the
   tray menu
+- The chosen mic stays selected while it is unplugged (or still starting up
+  after boot); MicFX waits and starts by itself when it is back
 - Two microphone inputs: a primary mic plus an optional auto-switch mic that
   takes over whenever it is actually carrying audio (e.g. a VR headset mic once
   the headset connects) and hands back when it goes idle — applications
@@ -91,7 +101,8 @@ dotnet run --project src/MicFX
 `publish.cmd` produces a self-contained single-file `dist\MicFX.exe`.
 
 Tests cover the DSP (suppression, gate, limiter, loudness meter against EBU
-Tech 3341 cases, drift compensation, input selection):
+Tech 3341 cases, drift compensation, input selection), clip lead-in
+detection and the clip library:
 
 ```
 dotnet test tests/MicFX.Tests
@@ -114,7 +125,8 @@ with "dry run" checked builds and tests everything without publishing.
 | "Error: ... device in use" on Start | Another application holds the device in exclusive mode. Disable exclusive mode in the device's sound settings or close the other application. |
 | Discord hears nothing | Check MicFX output is CABLE Input, Discord input is CABLE Output, and the engine is running (meters move when you talk). |
 | Crackling or dropouts | Switch the latency setting back to Normal in the settings menu, or close CPU-heavy applications. |
-| Hotkeys do not fire | Another application owns the combination. MicFX skips combinations it cannot register; assign a different one per clip. |
+| Hotkeys do not fire | Another application (or another tile) owns the combination; the tile shows a ⚠ with the reason in its tooltip. Assign a different one per clip (right-click, Edit). |
+| Can't type ~ ^ ` or other AltGr characters | A Ctrl+Alt hotkey uses the same keys (Windows treats Ctrl+Alt as AltGr). Tiles that block a character show a ⚠; give them another key. |
 | Callers hear an echo of themselves | Disable "Listen in headphones", or make sure the monitor device is headphones rather than speakers. |
 | Soundboard sounds broken or muffled to others | Discord's Krisp/noise suppression filters out non-voice audio, which includes soundboard clips. Disable noise suppression in Discord and enable MicFX's instead (CLEAN-UP > Noise suppression) — MicFX suppresses noise before the soundboard is mixed in. |
 
@@ -138,13 +150,20 @@ src/MicFX/
     SpectrumTapSampleProvider.cs sample window for the spectrum display
     TeeSampleProvider.cs         split-off for self-monitoring
   Models/AppSettings.cs          JSON persistence, profiles
+  Models/SoundLibrary.cs         MicFX's own copies of soundboard clips
   HotkeyManager.cs               global hotkey registration
-  MainWindow.xaml(.cs)           main UI
+  HotkeyNames.cs                 layout-aware key names, AltGr clash check
+  HotkeyCapture.cs               key press -> hotkey, shared by the hotkey boxes
+  MainWindow.xaml(.cs)           main window: fields, constructor, layout
+  MainWindow.*.cs                the rest of it by area: Devices, Processing,
+                                 Soundboard, Settings, Updates, Tray
+  SoundTile.cs                   soundboard tile state (labels, progress)
   Theme.cs                       accent color presets, runtime recoloring
   EditSoundWindow.xaml(.cs)      per-clip editor (volume, loop, hotkey, preview)
+  AboutWindow.xaml(.cs)          version, license, third-party notices
   App.xaml                       theme
 installer/MicFX.iss              Inno Setup script (built in CI)
-tests/MicFX.Tests/               xUnit tests for the audio code
+tests/MicFX.Tests/               xUnit tests for the audio code and the clip library
 ```
 
 ## Credits

@@ -2,56 +2,54 @@
 
 - `MicFX-Setup-<version>.exe` - installer (Start Menu entry, uninstaller)
 - `MicFX.exe` - portable single-file build
-- `MicFX-<version>-win-x64.zip` - portable build, zipped
+- `MicFX-<version>-win-x64.zip` - portable build, zipped, with the license files
 
 The binaries are unsigned, so SmartScreen may warn on first run
 (More info > Run anyway). In-app updates are not affected.
 
+### Soundboard
+
+- Drag and drop: drop audio files, or a folder of them, onto the soundboard
+  to add them.
+- MicFX keeps its own copy of every clip (in `%APPDATA%\MicFX\Sounds`), so
+  moving, renaming or deleting the original file no longer breaks the tile.
+  Existing clips are copied once in the background after updating.
+- Clips start instantly: a silent lead-in at the start of a clip is detected
+  once and skipped (also for loops and preview). Can be turned off per clip
+  in Edit, which shows the measured time.
+- Playing clips show a progress bar on their tile.
+- New stop-all hotkey, Ctrl+Alt+0 by default; change it in the settings menu.
+
+### Hotkeys
+
+- Hotkeys show as printed on your keyboard. Labels saved by older versions,
+  such as "Ctrl+Alt+D1" or "Ctrl+Alt+Oem3", now read "Ctrl+Alt+1" or the
+  actual key.
+- Windows treats Ctrl+Alt as AltGr, so a Ctrl+Alt hotkey also blocks typing
+  that AltGr character everywhere while MicFX runs (on a Czech keyboard
+  Ctrl+Alt+1 is AltGr+1, which types ~). Such hotkeys are marked with ⚠ on
+  the tile, with the blocked character in the tooltip, and the hotkey editor
+  warns while you set one. Hotkeys another app already owns are marked too.
+- Setting a hotkey that MicFX already uses now records it instead of playing
+  the clip.
+
 ### Fixes
 
-- Headphone monitor stayed silent if the headphones were switched on after
-  MicFX started (e.g. after boot), or were turned off and on while it was
-  running, even though it showed as enabled. It now opens them as soon as
-  they appear and recovers within about a second after the device resets
-  (power cycle, replug, sample rate change).
-- The monitor device is remembered while the headphones are off. The list
-  shows it as "(not connected)" instead of switching to the Windows default
-  device.
-- If the output device (the virtual cable) resets, the engine restarts itself
-  instead of running silently.
+- Unplugging the microphone, or it starting late after boot, made MicFX
+  switch to another mic and forget yours. The mic now stays selected as
+  "(not connected)", MicFX waits, and it starts by itself when the mic is
+  back.
+- The soundboard toolbar hint no longer gets cut off.
 
-### Spectral noise suppression
+### License
 
-- Rewritten. The old version set each frequency's gain from that instant's
-  noise level, so random noise peaks got through as short tones (the chirpy,
-  watery "musical noise"), and it removed only about 8 dB whatever the strength
-  was set to. It now estimates speech per frequency over several frames
-  (decision-directed, Ephraim-Malah) and holds pauses at the set level.
-  Measured on real speech with fan, hiss and hum noise at 10-20 dB SNR:
-
-  | Strength | Noise removed in pauses, 1.10.0 | 1.10.1 |
-  |----------|---------------------------------|--------|
-  | 18 dB    | 8 dB                            | 18 dB  |
-  | 30 dB    | 9 dB                            | 30 dB  |
-
-  Musical noise (log kurtosis ratio of the leftover noise, 0 = same character
-  as the original noise, only quieter) went from 1.4 to 0.0.
-- A single frame of voice can no longer pull the noise estimate up, so held
-  notes and soft syllables are not learned as noise and suppressed later.
-- The AI engine is still the better choice for anything but steady noise.
-
-### Voice leveler
-
-- Make-up gain now applies to your voice, not to the silence between words.
-  At 100 it used to lift pauses by up to 13.75 dB, which undid most of the
-  noise suppression and made the leftover noise pump up between words.
-  After spectral suppression at 18 dB: pauses at -62.5 dBFS instead of -51,
-  same speech level.
-
-### Layout
-
-- The equalizer stops growing at a comfortable height; extra window height
-  goes to the soundboard.
+- MicFX is now licensed under the GNU GPL, version 3 or later. Copyright
+  (C) 2026 Norbertque.
+- The licenses of the bundled components (NAudio, RNNoise, .NET runtime) ship
+  with every download and are shown in the app under Settings > About.
+- The GitHub account was renamed to Norbertque. The in-app updater now finds
+  releases by the repository's permanent ID, so it keeps working through
+  future renames.
 
 ### First-time setup
 
@@ -61,5 +59,5 @@ The binaries are unsigned, so SmartScreen may warn on first run
    press Start.
 3. In Discord/OBS: select "CABLE Output" as the microphone.
 
-See the [README](https://github.com/Norbeto0/MicFX#readme) for full
+See the [README](https://github.com/Norbertque/MicFX#readme) for full
 instructions and troubleshooting.

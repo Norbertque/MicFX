@@ -73,6 +73,9 @@ public partial class MainWindow : Window
         RefreshHotkeys();
         // Key names and AltGr clashes depend on the keyboard layout.
         System.Windows.Input.InputLanguageManager.Current.InputLanguageChanged += (_, _) => RefreshHotkeys();
+        // The stop-all box releases the hotkeys while focused; re-register when
+        // the menu closes in case it never got its LostKeyboardFocus.
+        menuPopup.Closed += (_, _) => RefreshHotkeys();
         StartSpectrumTimer();
         TryAutoStart();
         CheckCableSetup();
