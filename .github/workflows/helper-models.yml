@@ -1,0 +1,89 @@
+name: Helper models
+
+# Exports the AI voice helper models with the scripts in tools/ and publishes
+# them as a pre-release that is never marked latest: the in-app updater reads
+# /releases/latest and expects a version number there.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag for the helper models (models-N, never a version number)'
+        required: true
+        default: 'models-1'
+      dry_run:
+        description: 'Export and check only, do not publish'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Check tag
+        run: |
+          case "$TAG" in
+            models-[0-9]*) ;;
+            *) echo "Tag must be models-N"; exit 1 ;;
+          esac
+
+      - name: Install exporters
+        run: |
+          pip install --index-url https://download.pytorch.org/whl/cpu torch==2.15.0
+          pip install numpy==2.5.5 onnx==1.23.2 onnxruntime==1.32.0 transformers==5.23.0 \
+            torchfcpe==0.0.4 safetensors==0.8.0 huggingface_hub
+
+      - name: Export and check against PyTorch
+        run: |
+          mkdir out
+          python tools/export_contentvec.py out/contentvec.onnx | tee contentvec.txt
+          python tools/export_fcpe.py out/fcpe.onnx | tee fcpe.txt
+
+      - name: Release notes
+        run: |
+          cv=$(sha256sum out/contentvec.onnx | cut -d' ' -f1)
+          fc=$(sha256sum out/fcpe.onnx | cut -d' ' -f1)
+          cat > notes.md <<EOF
+          Helper models for the AI voice in MicFX 1.12.0 and later. This is not an app release: MicFX downloads these files itself when the AI voice is first switched on.
+
+          Neither file is a voice. They are the two models every RVC voice model needs: one that turns speech into content features, and a pitch tracker.
+
+          | File | What | Source and license | SHA-256 |
+          |---|---|---|---|
+          | contentvec.onnx | ContentVec content encoder (layer 12, and layer 9 through final_proj) | ContentVec, MIT; Transformers conversion lengyue233/content-vec-best (MIT) | $cv |
+          | fcpe.onnx | FCPE pitch extractor, as RVC calls it | torchfcpe 0.0.4 bundled model, MIT | $fc |
+
+          Exported by this repository's Helper models workflow with tools/export_contentvec.py and tools/export_fcpe.py, which check the ONNX output against PyTorch:
+
+          \`\`\`
+          $(grep -E '^(size|sha256|parity)' contentvec.txt)
+          $(grep -E '^(size|sha256|parity)' fcpe.txt)
+          \`\`\`
+          EOF
+          cat notes.md
+
+      - name: Publish pre-release
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$TAG" out/contentvec.onnx out/fcpe.onnx \
+            --target "$GITHUB_SHA" --title "AI voice helper models (${TAG#models-})" \
+            --notes-file notes.md --prerelease --latest=false
+          latest=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)
+          echo "Latest release is still $latest"
+          case "$latest" in
+            v[0-9]*) ;;
+            *) echo "The latest release is no longer an app version"; exit 1 ;;
+          esac

@@ -19,10 +19,33 @@ import hashlib
 import math
 import sys
 
+import types
+
 import numpy as np
 import onnxruntime as ort
 import torch
-from torchfcpe import spawn_bundled_infer_model
+
+try:
+    import torchaudio  # noqa: F401 - torchfcpe imports it
+except (ImportError, OSError):
+    # torchfcpe only uses torchaudio to resample input that is not 16 kHz; MicFX
+    # always gives it 16 kHz. Without a torchaudio build for this torch, stand in.
+    class _Resample(torch.nn.Module):
+        def __init__(self, orig_freq, new_freq, *args, **kwargs):
+            super().__init__()
+            if orig_freq != new_freq:
+                raise NotImplementedError("resampling needs torchaudio")
+
+        def forward(self, x):
+            return x
+
+    stub = types.ModuleType("torchaudio")
+    stub.transforms = types.ModuleType("torchaudio.transforms")
+    stub.transforms.Resample = _Resample
+    sys.modules["torchaudio"] = stub
+    sys.modules["torchaudio.transforms"] = stub.transforms
+
+from torchfcpe import spawn_bundled_infer_model  # noqa: E402
 
 
 N_FFT, HOP = 1024, 160
