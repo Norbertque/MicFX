@@ -78,6 +78,15 @@ jobs:
           MICFX_CUDA_PROBE: ${{ inputs.cuda_probe && '1' || '' }}
         run: dotnet test tests/MicFX.Tests/MicFX.Tests.csproj -c Release
 
+      # The AI voice exactly as the app runs it: managed ONNX Runtime API only, the
+      # native runtime, helper models and NVIDIA libraries downloaded from their
+      # pinned URLs and loaded by full path, the voice run on the CPU, and the GPU
+      # path checked to fail for the missing GPU (the runner has none) and fall back.
+      - name: AI voice runtime probe
+        if: ${{ inputs.cuda_probe }}
+        shell: pwsh
+        run: dotnet run --project tests/MicFX.RuntimeProbe -c Release
+
       - name: Verify RNNoise is embedded
         shell: pwsh
         run: |

@@ -1,7 +1,7 @@
 """Convert an RVC voice model (.pth, v1 or v2, 32/40/48 kHz) to ONNX for MicFX.
 
     python convert_rvc.py MODEL.pth OUT.onnx
-    python convert_rvc.py --untrained v2 40000 OUT.onnx    # random weights, for tests
+    python convert_rvc.py --untrained v2 40000 OUT.onnx [--no-pitch]   # random weights, for tests
 
 Only convert voices you have the right to use.
 
@@ -52,12 +52,19 @@ RVC_FILES = {
     "transforms.py": "fb0d3320adf32ca0eaa44dd56e8922927f77ec3dd45c775e10c3da1704072c6a",
 }
 TRACE_FRAMES = 128
+_R = "1", [3, 7, 11], [[1, 3, 5]] * 3
+# RVC's configs/v1 and configs/v2 (v2 at 40 kHz uses the v1 file):
+# spec channels, segment frames, inter, hidden, filter, heads, layers, kernel, dropout,
+# resblock, its kernels and dilations, upsample rates, initial channel, upsample kernels,
+# speakers, gin channels, sample rate.
+_V1_32K = [513, 40, 192, 192, 768, 2, 6, 3, 0, *_R, [10, 4, 2, 2, 2], 512, [16, 16, 4, 4, 4], 109, 256, 32000]
+_V1_40K = [1025, 32, 192, 192, 768, 2, 6, 3, 0, *_R, [10, 10, 2, 2], 512, [16, 16, 4, 4], 109, 256, 40000]
+_V1_48K = [1025, 24, 192, 192, 768, 2, 6, 3, 0, *_R, [10, 6, 2, 2, 2], 512, [16, 16, 4, 4, 4], 109, 256, 48000]
+_V2_32K = [513, 40, 192, 192, 768, 2, 6, 3, 0, *_R, [10, 8, 2, 2], 512, [20, 16, 4, 4], 109, 256, 32000]
+_V2_48K = [1025, 36, 192, 192, 768, 2, 6, 3, 0, *_R, [12, 10, 2, 2], 512, [24, 20, 4, 4], 109, 256, 48000]
 UNTRAINED_CONFIGS = {
-    # spec, segment, inter, hidden, filter, heads, layers, kernel, dropout, resblock,
-    # resblock kernels, dilations, upsample rates, initial channel, upsample kernels, speakers, gin, sr
-    32000: [513, 32, 192, 192, 768, 2, 6, 3, 0, "1", [3, 7, 11], [[1, 3, 5]] * 3, [10, 8, 2, 2], 512, [20, 16, 4, 4], 109, 256, 32000],
-    40000: [1025, 32, 192, 192, 768, 2, 6, 3, 0, "1", [3, 7, 11], [[1, 3, 5]] * 3, [10, 10, 2, 2], 512, [16, 16, 4, 4], 109, 256, 40000],
-    48000: [1025, 32, 192, 192, 768, 2, 6, 3, 0, "1", [3, 7, 11], [[1, 3, 5]] * 3, [12, 10, 2, 2], 512, [24, 20, 4, 4], 109, 256, 48000],
+    ("v1", 32000): _V1_32K, ("v1", 40000): _V1_40K, ("v1", 48000): _V1_48K,
+    ("v2", 32000): _V2_32K, ("v2", 40000): _V1_40K, ("v2", 48000): _V2_48K,
 }
 
 
@@ -165,7 +172,7 @@ def main(argv):
     models = rvc_modules()
     if argv[0] == "--untrained":
         version, sr, out_path = argv[1], int(argv[2]), argv[3]
-        config, uses_pitch, state = list(UNTRAINED_CONFIGS[sr]), True, None
+        config, uses_pitch, state = list(UNTRAINED_CONFIGS[(version, sr)]), "--no-pitch" not in argv, None
     else:
         model_path, out_path = argv[0], argv[1]
         cpt = torch.load(model_path, map_location="cpu", weights_only=True)
@@ -182,7 +189,6 @@ def main(argv):
     names = ["phone", "phone_lengths"] + (["pitch", "pitchf"] if uses_pitch else []) + ["ds", "rnd", "skip_head", "return_length"]
 
     # The NSF source adds Gaussian noise; make it zero for the parity runs only.
-    sine = model.net.dec.m_source.l_sin_gen
     original_randn_like = torch.randn_like
 
     def export(path, deterministic):
@@ -238,7 +244,7 @@ def main(argv):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) not in (3, 5):
+    if len(sys.argv) not in (3, 5, 6):
         print(__doc__)
         sys.exit(2)
     main(sys.argv[1:])

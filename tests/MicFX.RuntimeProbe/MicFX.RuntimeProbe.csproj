@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Checks the AI voice's real runtime path on Windows, the way the app uses it:
+       only the managed ONNX Runtime API is referenced; the native runtime, the
+       helper models and the NVIDIA libraries are downloaded from their pinned
+       URLs and loaded through OrtNative. Run by the release workflow's
+       cuda_probe option (needs Windows, no GPU). Not part of MicFX.sln. -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NAudio" Version="2.2.1" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime.Managed" Version="1.32.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="../../src/MicFX/Audio/*.cs" Exclude="../../src/MicFX/Audio/AudioEngine.cs" LinkBase="Audio" />
+    <Compile Include="../../src/MicFX/AiVoice/*.cs" LinkBase="AiVoice" />
+    <None Include="../MicFX.Tests/Fixtures/gen-micfx.onnx" Link="gen-micfx.onnx" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>
