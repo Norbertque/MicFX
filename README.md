@@ -132,8 +132,9 @@ they stopped.
 
 While a model loads the voice is silent, so your real voice does not slip
 through. The status under the pitch slider shows how long the model takes per
-block (for example "GPU: 18 ms per 100 ms block"). A minute after the AI voice
-is switched off, the model is unloaded to free GPU memory.
+block and how much time was left before the block had to play (for example
+"GPU: 20 ms per block, 30 ms to spare"). A minute after the AI voice is
+switched off, the model is unloaded to free GPU memory.
 
 ### Getting a voice model
 
@@ -160,9 +161,11 @@ ONNX format. To make one:
    PyTorch.
 3. In MicFX: VOICE > Load..., choose `myvoice.onnx`, tick AI voice.
 
-ONNX exports from older RVC WebUI versions and from w-okada's voice changer
-also load, but they cannot skip their context the way converted models do,
-so they cost more GPU time per block.
+MicFX also recognises the ONNX exports of older RVC WebUI versions and of
+w-okada's voice changer, but they have only been tested with stand-in files,
+not real ones. They cannot skip their context the way converted models do, so
+they would cost more GPU time per block; converting the .pth is the tested
+route.
 
 ### Using it
 

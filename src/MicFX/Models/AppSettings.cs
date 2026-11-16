@@ -35,10 +35,11 @@ public class Profile
     public bool CompressorEnabled { get; set; }
     public float CompressorAmount { get; set; } = 50f;
     public float[] EqGainsDb { get; set; } = new float[10];
-    public bool AiVoiceEnabled { get; set; }
+    // AI voice: null (profiles saved before 1.12) leaves the current setting alone.
+    public bool? AiVoiceEnabled { get; set; }
     /// <summary>Voice model (.onnx) the profile uses; null keeps whatever is loaded.</summary>
     public string? AiVoiceModelPath { get; set; }
-    public float AiVoicePitch { get; set; }
+    public float? AiVoicePitch { get; set; }
 }
 
 public class AppSettings

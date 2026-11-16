@@ -22,7 +22,9 @@ public class SettingsTests
         Assert.Equal("Cuda", s.AiVoiceBackend);
         Assert.Equal("Normal", s.AiVoiceDelay);
         Assert.False(s.AiVoiceNvidiaAccepted);
-        Assert.False(s.Profiles[0].AiVoiceEnabled);
+        // Old profiles leave the AI voice as it is when applied.
+        Assert.Null(s.Profiles[0].AiVoiceEnabled);
+        Assert.Null(s.Profiles[0].AiVoicePitch);
         Assert.Null(s.Profiles[0].AiVoiceModelPath);
         Assert.Equal(1.2f, s.MicGain);
         Assert.Equal("#3FB8AF", s.AccentColor);

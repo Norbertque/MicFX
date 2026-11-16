@@ -22,6 +22,7 @@ public partial class MainWindow
     private CancellationTokenSource? aiDownloadCancel;
     private bool aiUiUpdating;
     private bool aiStarting;
+    private bool aiDropoutNotified;
     private long aiSeenMisses;
     private DateTime aiWarningUntil;
     private (string Model, AiBackend Backend, AiVoiceDelay Delay)? aiLoadedConfig;
@@ -77,13 +78,14 @@ public partial class MainWindow
         _ => "0 st",
     };
 
+    /// <summary>Profiles saved before 1.12 have no AI voice settings and leave it as it is.</summary>
     private void ApplyProfileAiVoice(Profile p)
     {
         bool modelChanged = !string.IsNullOrEmpty(p.AiVoiceModelPath) && p.AiVoiceModelPath != settings.AiVoiceModelPath;
         if (!string.IsNullOrEmpty(p.AiVoiceModelPath)) settings.AiVoiceModelPath = p.AiVoiceModelPath;
-        sliderAiVoicePitch.Value = p.AiVoicePitch;
-        if (chkAiVoice.IsChecked != p.AiVoiceEnabled) chkAiVoice.IsChecked = p.AiVoiceEnabled; // its handler starts or stops the voice
-        else if (modelChanged && p.AiVoiceEnabled) _ = StartAiVoiceAsync();
+        if (p.AiVoicePitch is float pitch) sliderAiVoicePitch.Value = pitch;
+        if (p.AiVoiceEnabled is bool on && chkAiVoice.IsChecked != on) chkAiVoice.IsChecked = on; // its handler starts or stops the voice
+        else if (modelChanged && chkAiVoice.IsChecked == true) _ = StartAiVoiceAsync();
         UpdateAiVoiceUi();
     }
 
@@ -186,9 +188,9 @@ public partial class MainWindow
             if (chkAiVoice.IsChecked != true) return;
             host.Pitch = settings.AiVoicePitch;
             engine.SetAiVoice(true, null); // silent while the model loads, so the real voice never leaks
-            bool ok = await host.LoadAsync(model, backend, delay);
+            bool ok = await host.LoadAsync(model, backend, delay,
+                gpuNote != null ? $"NVIDIA GPU not used: {gpuNote} Running on the CPU." : null);
             aiLoadedConfig = ok ? (model, AiBackendSetting, delay) : null;
-            if (ok && gpuNote != null) ShowAiStatus($"NVIDIA GPU not used: {gpuNote} Running on the CPU.", warn: true);
         }
         catch (Exception ex)
         {
@@ -295,6 +297,8 @@ public partial class MainWindow
     {
         if (aiHost == null) return;
         engine.SetAiVoice(chkAiVoice.IsChecked == true, aiHost.Stream);
+        if (aiHost.State == AiVoiceState.Failed && chkAiVoice.IsChecked == true)
+            NotifyAiProblem("AI voice could not start: " + aiHost.Status);
         if (aiHost.State == AiVoiceState.Running)
         {
             aiSeenMisses = aiHost.Stream?.MissedBlocks ?? 0;
@@ -316,8 +320,7 @@ public partial class MainWindow
         {
             aiStatusTimer ??= CreateAiStatusTimer();
             aiStatusTimer.Start();
-            if (!string.IsNullOrEmpty(aiHost!.Status)) ShowAiStatus(aiHost.Status, warn: true);
-            else UpdateAiRunningStatus();
+            UpdateAiRunningStatus();
             return;
         }
         aiStatusTimer?.Stop();
@@ -346,6 +349,11 @@ public partial class MainWindow
         long misses = stream.MissedBlocks;
         if (misses != aiSeenMisses)
         {
+            if (!aiDropoutNotified)
+            {
+                aiDropoutNotified = true;
+                NotifyAiProblem("AI voice can't keep up: it is muted until it does. A longer delay in Settings gives it more room.");
+            }
             aiSeenMisses = misses;
             aiWarningUntil = DateTime.UtcNow + AiWarningHold;
         }
@@ -355,11 +363,29 @@ public partial class MainWindow
                          "or give the GPU more room.", warn: true);
             return;
         }
-        // A fallback note from loading stays until the voice is switched off.
-        if (!string.IsNullOrEmpty(aiHost!.Status)) return;
-        string where = aiHost.Backend == AiBackend.Cuda ? "GPU" : "CPU";
+        // Spare time: how long before its turn to play a block was ready (the real
+        // limit is the allowance minus the audio read size, so this is the honest figure).
+        string where = aiHost!.Backend == AiBackend.Cuda ? "GPU" : "CPU";
         float ms = stream.LastComputeMs;
-        ShowAiStatus(ms > 0 ? $"{where}: {ms:0} ms per {stream.Timing.Block / 48} ms block" : $"Running on the {where}", warn: false);
+        float spare = stream.MinRecentHeadroomMs;
+        string text = ms <= 0 ? $"Running on the {where}"
+            : float.IsNaN(spare) ? $"{where}: {ms:0} ms per block"
+            : $"{where}: {ms:0} ms per block, {Math.Max(0, spare):0} ms to spare";
+        // A note from loading (why the GPU is not used) stays in front while it runs.
+        string note = aiHost!.Status;
+        ShowAiStatus(note.Length > 0 ? $"{note} {text}" : text, warn: note.Length > 0);
+    }
+
+    /// <summary>
+    /// Puts an AI voice problem in the main status line too, and in a tray balloon
+    /// while the window is hidden, so a muted mic never goes unexplained.
+    /// </summary>
+    private void NotifyAiProblem(string text)
+    {
+        txtStatus.Text = text;
+        AiHost.Log.Write(text);
+        if (!IsVisible)
+            trayIcon?.ShowBalloonTip(5000, "MicFX — AI voice", text, System.Windows.Forms.ToolTipIcon.Warning);
     }
 
     private void ShowAiStatus(string text, bool warn)

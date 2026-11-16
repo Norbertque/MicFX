@@ -135,9 +135,10 @@ public sealed class AiVoiceHost : IDisposable
 
     /// <summary>
     /// Loads a voice model and starts streaming. Returns false (with <see cref="Status"/>
-    /// saying why) when it cannot run. Files must be installed first.
+    /// saying why) when it cannot run. Files must be installed first. <paramref name="note"/>
+    /// (for example why the GPU is not used) is logged and kept as the status while running.
     /// </summary>
-    public async Task<bool> LoadAsync(string modelPath, AiBackend backend, AiVoiceDelay delay)
+    public async Task<bool> LoadAsync(string modelPath, AiBackend backend, AiVoiceDelay delay, string? note = null)
     {
         await busy.WaitAsync().ConfigureAwait(false);
         try
@@ -154,7 +155,8 @@ public sealed class AiVoiceHost : IDisposable
             current.Stream.StartWorker();
             loggedMisses = 0;
             statsTimer.Change(10_000, 10_000);
-            SetState(AiVoiceState.Running, loaded.Note);
+            if (note != null) Log.Write(note);
+            SetState(AiVoiceState.Running, loaded.Note.Length > 0 ? loaded.Note : note ?? "");
             return true;
         }
         finally
