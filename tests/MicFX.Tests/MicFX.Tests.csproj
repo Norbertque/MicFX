@@ -18,11 +18,18 @@
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
     <PackageReference Include="NAudio" Version="2.2.1" />
+    <!-- Includes the native CPU runtime for Linux and Windows, for the model tests. -->
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.32.0" />
   </ItemGroup>
 
   <ItemGroup>
     <Compile Include="../../src/MicFX/Audio/*.cs" Exclude="../../src/MicFX/Audio/AudioEngine.cs" LinkBase="Audio" />
     <Compile Include="../../src/MicFX/Models/SoundLibrary.cs" Link="Models/SoundLibrary.cs" />
+    <Compile Include="../../src/MicFX/AiVoice/*.cs" LinkBase="AiVoice" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="Fixtures/*.onnx" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

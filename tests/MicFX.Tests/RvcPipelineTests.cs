@@ -28,24 +28,29 @@ public class RvcPipelineTests
         }
     }
 
-    /// <summary>Records its inputs; outputs each frame's index as a constant.</summary>
+    /// <summary>Records its inputs; outputs each returned frame's index as a constant.</summary>
     private sealed class RecordingGenerator : IVoiceGenerator
     {
         public int SampleRate { get; init; } = 48000;
         public int FeatureDim { get; init; } = 768;
         public bool UsesPitch { get; init; } = true;
+        public int Frames { get; init; }
         public float[] Features = Array.Empty<float>();
         public long[] Coarse = Array.Empty<long>();
         public float[] F0 = Array.Empty<float>();
+        public int SkipHead, ReturnFrames;
 
-        public void Generate(ReadOnlySpan<float> features, ReadOnlySpan<long> coarsePitch, ReadOnlySpan<float> f0, int frames, Span<float> audio)
+        public void Generate(ReadOnlySpan<float> features, ReadOnlySpan<long> coarsePitch, ReadOnlySpan<float> f0,
+            int skipHead, int returnFrames, Span<float> audio)
         {
             Features = features.ToArray();
             Coarse = coarsePitch.ToArray();
             F0 = f0.ToArray();
+            SkipHead = skipHead;
+            ReturnFrames = returnFrames;
             int per = SampleRate / 100;
-            Assert.Equal(frames * per, audio.Length);
-            for (int t = 0; t < frames; t++) audio.Slice(t * per, per).Fill(t);
+            Assert.Equal(returnFrames * per, audio.Length);
+            for (int t = 0; t < returnFrames; t++) audio.Slice(t * per, per).Fill(skipHead + t);
         }
     }
 
@@ -66,44 +71,65 @@ public class RvcPipelineTests
     }
 
     [Fact]
-    public void FeaturesArePairedFramesOfTheNewestGeneratorWindow()
+    public void FeaturesArePairedFrames_AndTheGeneratorIsAskedForTheNewestFrames()
     {
         var encoder = new FrameIndexEncoder();
         var gen = new RecordingGenerator { FeatureDim = 256 };
         var p = new RvcPipeline(Timing, encoder, new RampPitch(), gen);
         p.Convert(new float[p.ContextSamples], new float[Timing.Output], true);
 
+        int frames = p.Frames;
+        Assert.Equal(RvcPipeline.DefaultContextMs / 10 + Timing.Output / 480, frames);
         Assert.Equal(p.ContextSamples / 3, encoder.Samples);
-        int frames10 = p.ContextSamples / 480;
         int frames20 = (encoder.Samples - 400) / 320 + 1;
-        int g = p.GeneratorFrames;
-        Assert.Equal(RvcPipeline.LeftContextFrames + Timing.Output / 480, g);
-        Assert.Equal(g * 256, gen.Features.Length);
-        for (int t = 0; t < g; t++)
+        Assert.Equal(frames * 256, gen.Features.Length);
+        for (int t = 0; t < frames; t++)
         {
-            float expected = Math.Min((frames10 - g + t) / 2, frames20 - 1);
+            float expected = Math.Min(t / 2, frames20 - 1);
             Assert.Equal(expected, gen.Features[t * 256]);
             Assert.Equal(expected, gen.Features[t * 256 + 255]);
         }
+        Assert.Equal(Timing.Output / 480 + 1, gen.ReturnFrames);
+        Assert.Equal(frames - gen.ReturnFrames, gen.SkipHead);
     }
 
     [Fact]
-    public void PitchDropsTheTrackersEdgeFrames_AndTransposes()
+    public void ModelWithFixedLength_SetsTheContext()
+    {
+        var gen = new RecordingGenerator { Frames = 128 };
+        var p = new RvcPipeline(Timing, new FrameIndexEncoder(), new RampPitch(), gen);
+        Assert.Equal(128, p.Frames);
+        Assert.Equal(128 * 480, p.ContextSamples);
+        Assert.Throws<ArgumentException>(() => new RvcPipeline(Timing, new FrameIndexEncoder(), new RampPitch(), new RecordingGenerator { Frames = 30 }));
+    }
+
+    [Fact]
+    public void PitchIsTrackedForTheNewBlockOnly_AndMovesAlongWithTheBlocks()
     {
         var pitch = new RampPitch();
         var gen = new RecordingGenerator();
         var p = new RvcPipeline(Timing, new FrameIndexEncoder(), pitch, gen) { Transpose = 12 };
-        p.Convert(new float[p.ContextSamples], new float[Timing.Output], true);
+        int block = Timing.Block / 480, kept = block + 2, frames = p.Frames;
 
-        int g = p.GeneratorFrames;
-        Assert.Equal(160 * (g + 3), pitch.Samples);
-        Assert.Equal(g + 4, pitch.Frames);
-        for (int t = 0; t < g; t++)
+        p.Convert(new float[p.ContextSamples], new float[Timing.Output], continuous: false);
+        Assert.Equal(160 * block + 800, pitch.Samples);
+        Assert.Equal(block + 6, pitch.Frames);
+        // After a gap only the new part is voiced: tracker frames 3 .. n-2, transposed an octave up.
+        for (int t = 0; t < frames - kept; t++) Assert.Equal(0f, gen.F0[t]);
+        for (int j = 0; j < kept; j++)
         {
-            float hz = (100 + 3 + t) * 2f;
-            Assert.Equal(hz, gen.F0[t], 3);
-            Assert.Equal(RvcPipeline.CoarsePitch(hz), gen.Coarse[t]);
+            float hz = (100 + 3 + j) * 2f;
+            Assert.Equal(hz, gen.F0[frames - kept + j], 3);
+            Assert.Equal(RvcPipeline.CoarsePitch(hz), gen.Coarse[frames - kept + j]);
         }
+        Assert.All(gen.Coarse.Take(frames - kept), c => Assert.Equal(1, c));
+
+        // Next block: the earlier values move back by one block, the newest are overwritten.
+        p.Convert(new float[p.ContextSamples], new float[Timing.Output], continuous: true);
+        for (int j = 0; j < kept - block; j++)
+            Assert.Equal((100 + 3 + j) * 2f, gen.F0[frames - kept - block + j], 3);
+        for (int j = 0; j < kept; j++)
+            Assert.Equal((100 + 3 + j) * 2f, gen.F0[frames - kept + j], 3);
     }
 
     [Fact]
@@ -120,18 +146,17 @@ public class RvcPipelineTests
     [InlineData(48000)]
     [InlineData(40000)]
     [InlineData(32000)]
-    public void OutputIsTheNewestGeneratedFrames_At48k(int rate)
+    public void OutputIsTheReturnedFrames_At48k_WithoutTheResamplersEdgeFrame(int rate)
     {
         var gen = new RecordingGenerator { SampleRate = rate };
         var p = new RvcPipeline(Timing, new FrameIndexEncoder(), new RampPitch(), gen);
         var output = new float[Timing.Output];
         p.Convert(new float[p.ContextSamples], output, true);
 
-        int returned = Timing.Output / 480;
-        int g = p.GeneratorFrames;
-        // Away from the frame edges (resampler ringing), each 10 ms of output is one generator frame.
-        for (int t = 0; t < returned; t++)
+        int outputFrames = Timing.Output / 480;
+        // Away from the frame edges (resampler ringing), each 10 ms of output is one generated frame.
+        for (int t = 0; t < outputFrames; t++)
             for (int i = 120; i < 360; i++)
-                Assert.Equal(g - returned + t, output[t * 480 + i], 2);
+                Assert.Equal(p.Frames - outputFrames + t, output[t * 480 + i], 2);
     }
 }

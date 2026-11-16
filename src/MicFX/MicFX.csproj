@@ -21,6 +21,8 @@
 
   <ItemGroup>
     <PackageReference Include="NAudio" Version="2.2.1" />
+    <!-- Managed API only: the native runtime is downloaded on first use of the AI voice. -->
+    <PackageReference Include="Microsoft.ML.OnnxRuntime.Managed" Version="1.32.0" />
   </ItemGroup>
 
   <ItemGroup>

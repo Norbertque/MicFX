@@ -31,27 +31,33 @@ public interface IVoiceGenerator
     /// <summary>False for models trained without pitch.</summary>
     bool UsesPitch { get; }
 
+    /// <summary>Frames per call the model needs, or 0 when any length works.</summary>
+    int Frames { get; }
+
     /// <summary>
-    /// Synthesises <paramref name="frames"/> 10 ms frames into frames * SampleRate / 100 samples.
+    /// Synthesises frames [skipHead, skipHead + returnFrames) of the <c>features.Length / FeatureDim</c>
+    /// 10 ms frames given, into returnFrames * SampleRate / 100 samples. Earlier frames are context.
     /// <paramref name="coarsePitch"/> and <paramref name="f0"/> are empty when the model uses no pitch.
     /// </summary>
-    void Generate(ReadOnlySpan<float> features, ReadOnlySpan<long> coarsePitch, ReadOnlySpan<float> f0, int frames, Span<float> audio);
+    void Generate(ReadOnlySpan<float> features, ReadOnlySpan<long> coarsePitch, ReadOnlySpan<float> f0,
+        int skipHead, int returnFrames, Span<float> audio);
 }
 
 /// <summary>
 /// The RVC voice conversion steps around the three models, following RVC's
 /// real-time inference (infer/lib/rtrvc.py, MIT): 16 kHz content features
 /// over the whole context, each 20 ms frame used twice for the 10 ms frame
-/// grid, pitch for the frames the generator sees with three frames dropped at
-/// the start and one at the end of the tracker's window, and the generator
-/// run on the newest frames only (24 frames of left context, as upstream
-/// keeps for its flow, plus the frames returned). All shapes are fixed at
-/// construction, so model sessions never re-plan while streaming.
+/// grid; pitch tracked only for the newest block plus 50 ms and kept in a
+/// buffer that moves along with the blocks (the tracker's first three and
+/// last frame are dropped); the generator asked for the newest frames only.
+/// One frame more than the block's output is synthesised so the resampler
+/// has real audio at its left edge. All shapes are fixed at construction,
+/// so model sessions never re-plan while streaming.
 /// </summary>
 public sealed class RvcPipeline : IVoiceConverter
 {
-    /// <summary>Generator frames of left context before the returned frames.</summary>
-    public const int LeftContextFrames = 24;
+    /// <summary>Context frames used when the generator accepts any length (1 s plus the returned audio).</summary>
+    public const int DefaultContextMs = 1000;
 
     private const float F0Min = 50f, F0Max = 1100f;
     private static readonly float MelMin = 1127f * MathF.Log(1f + F0Min / 700f);
@@ -62,11 +68,12 @@ public sealed class RvcPipeline : IVoiceConverter
     private readonly IVoiceGenerator generator;
     private readonly RationalResampler down;
     private readonly RationalResampler up;
-    private readonly int dim, outputFrames, generatorFrames, frames10, frames20, pitchWindow, returnSamples;
+    private readonly int dim, frames, frames20, blockFrames, returnFrames, pitchSamples, pitchNew;
     private readonly float[] audio16;
     private readonly float[] features20;
     private readonly float[] features;
     private readonly float[] f0Window;
+    private readonly float[] f0Cache;
     private readonly float[] f0;
     private readonly long[] coarse;
     private readonly float[] generated;
@@ -74,49 +81,54 @@ public sealed class RvcPipeline : IVoiceConverter
     private float transpose;
 
     /// <param name="timing">Stream timing; block, crossfade and search must be multiples of 10 ms.</param>
-    /// <param name="contextMs">Audio before the returned part that the content encoder sees.</param>
-    public RvcPipeline(VoiceTiming timing, IContentEncoder encoder, IPitchExtractor? pitch, IVoiceGenerator generator, int contextMs = 1000)
+    public RvcPipeline(VoiceTiming timing, IContentEncoder encoder, IPitchExtractor? pitch, IVoiceGenerator generator)
     {
-        if (timing.Output % 480 != 0) throw new ArgumentException("Timing must be on a 10 ms grid.", nameof(timing));
+        if (timing.Output % 480 != 0 || timing.Block % 480 != 0) throw new ArgumentException("Timing must be on a 10 ms grid.", nameof(timing));
         if (generator.UsesPitch && pitch == null) throw new ArgumentException("This model needs a pitch extractor.", nameof(pitch));
         this.encoder = encoder;
         this.pitch = generator.UsesPitch ? pitch : null;
         this.generator = generator;
         dim = generator.FeatureDim;
 
-        outputFrames = timing.Output / 480;
-        generatorFrames = LeftContextFrames + outputFrames;
-        int contextFrames = Math.Max((contextMs + 9) / 10 + outputFrames, generatorFrames + 4);
-        ContextSamples = contextFrames * 480;
-        int samples16 = contextFrames * 160;
-        frames10 = contextFrames;
+        int outputFrames = timing.Output / 480;
+        returnFrames = outputFrames + 1;
+        blockFrames = timing.Block / 480;
+        frames = generator.Frames > 0 ? generator.Frames : DefaultContextMs / 10 + outputFrames;
+        if (frames < returnFrames + 24 + 6 || frames < blockFrames + 6)
+            throw new ArgumentException($"The model works on {frames} frames, too few for this delay setting.", nameof(generator));
+        ContextSamples = frames * 480;
+        int samples16 = frames * 160;
         frames20 = (samples16 - 400) / 320 + 1;
-        pitchWindow = 160 * (generatorFrames + 3);
+        pitchSamples = blockFrames * 160 + 800; // the new block plus 50 ms
+        pitchNew = blockFrames + 2;             // tracker frames kept: all but the first three and the last
 
         down = new RationalResampler(48000, 16000);
         up = new RationalResampler(generator.SampleRate, 48000);
-        returnSamples = (outputFrames + 1) * generator.SampleRate / 100; // one extra frame for the resampler's left edge
 
         audio16 = new float[samples16];
         features20 = new float[frames20 * dim];
-        features = new float[generatorFrames * dim];
-        f0Window = new float[pitchWindow / 160 + 1];
-        f0 = new float[generatorFrames];
-        coarse = new long[generatorFrames];
-        generated = new float[generatorFrames * generator.SampleRate / 100];
-        resampled = new float[(outputFrames + 1) * 480];
+        features = new float[frames * dim];
+        f0Window = new float[pitchSamples / 160 + 1];
+        f0Cache = new float[frames];
+        f0 = new float[frames];
+        coarse = new long[frames];
+        generated = new float[returnFrames * generator.SampleRate / 100];
+        resampled = new float[returnFrames * 480];
     }
 
     public int ContextSamples { get; }
 
-    /// <summary>Frames passed to the generator per call.</summary>
-    public int GeneratorFrames => generatorFrames;
+    /// <summary>10 ms frames passed to the generator per call.</summary>
+    public int Frames => frames;
+
+    /// <summary>Frames the generator synthesises per call.</summary>
+    public int ReturnFrames => returnFrames;
 
     /// <summary>Samples of 16 kHz audio the content encoder gets per call.</summary>
     public int EncoderSamples => audio16.Length;
 
     /// <summary>Samples of 16 kHz audio the pitch extractor gets per call.</summary>
-    public int PitchSamples => pitchWindow;
+    public int PitchSamples => pitchSamples;
 
     /// <summary>Pitch shift in semitones applied before synthesis. Safe to set from any thread.</summary>
     public float Transpose
@@ -131,28 +143,30 @@ public sealed class RvcPipeline : IVoiceConverter
         encoder.Encode(audio16, dim, features20);
 
         // 10 ms frame j uses 20 ms frame j / 2 (upstream appends the last frame
-        // once and repeats each frame twice); keep the generator's frames.
-        int first = frames10 - generatorFrames;
-        for (int t = 0; t < generatorFrames; t++)
-        {
-            int src = Math.Min((first + t) / 2, frames20 - 1);
-            Array.Copy(features20, src * dim, features, t * dim, dim);
-        }
+        // once and repeats each frame twice).
+        for (int t = 0; t < frames; t++)
+            Array.Copy(features20, Math.Min(t / 2, frames20 - 1) * dim, features, t * dim, dim);
 
         if (pitch != null)
         {
-            pitch.Extract(audio16.AsSpan(audio16.Length - pitchWindow), f0Window);
+            // The buffer moves one block per call; after a gap its old part is unvoiced.
+            if (continuous) Array.Copy(f0Cache, blockFrames, f0Cache, 0, frames - blockFrames);
+            else Array.Clear(f0Cache);
+            pitch.Extract(audio16.AsSpan(audio16.Length - pitchSamples), f0Window);
+            Array.Copy(f0Window, 3, f0Cache, frames - pitchNew, pitchNew);
+
             float factor = MathF.Pow(2f, Transpose / 12f);
-            for (int t = 0; t < generatorFrames; t++)
+            for (int t = 0; t < frames; t++)
             {
-                float hz = f0Window[3 + t] * factor;
+                float hz = f0Cache[t] * factor;
                 f0[t] = hz;
                 coarse[t] = CoarsePitch(hz);
             }
         }
 
-        generator.Generate(features, pitch != null ? coarse : default, pitch != null ? f0 : default, generatorFrames, generated);
-        up.Process(generated.AsSpan(generated.Length - returnSamples), resampled);
+        generator.Generate(features, pitch != null ? coarse : default, pitch != null ? f0 : default,
+            frames - returnFrames, returnFrames, generated);
+        up.Process(generated, resampled);
         resampled.AsSpan(480).CopyTo(output);
     }
 
