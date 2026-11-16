@@ -80,6 +80,23 @@
                         <TextBlock Text="Lower settings reduce delay but may crackle on slower PCs. Exclusive takes over the mic while the engine runs."
                                    FontSize="11" Foreground="{StaticResource SubtleTextBrush}"
                                    TextWrapping="Wrap" Margin="0,4,0,0"/>
+                        <TextBlock Text="AI voice runs on" FontSize="11" Foreground="{StaticResource SubtleTextBrush}"
+                                   Margin="0,12,0,0"/>
+                        <ComboBox x:Name="comboAiBackend" Margin="0,2,0,0" SelectionChanged="AiVoiceSetup_Changed">
+                            <ComboBoxItem Content="NVIDIA GPU (CUDA)" Tag="Cuda" IsSelected="True"/>
+                            <ComboBoxItem Content="CPU" Tag="Cpu"/>
+                        </ComboBox>
+                        <TextBlock Text="AI voice delay" FontSize="11" Foreground="{StaticResource SubtleTextBrush}"
+                                   Margin="0,8,0,0"/>
+                        <ComboBox x:Name="comboAiDelay" Margin="0,2,0,0" SelectionChanged="AiVoiceSetup_Changed">
+                            <ComboBoxItem Content="Short — about 150 ms" Tag="Short"/>
+                            <ComboBoxItem Content="Normal — about 210 ms" Tag="Normal" IsSelected="True"/>
+                            <ComboBoxItem Content="Safe — about 310 ms" Tag="Safe"/>
+                        </ComboBox>
+                        <TextBlock FontSize="11" Foreground="{StaticResource SubtleTextBrush}" TextWrapping="Wrap" Margin="0,4,0,0">
+                            <Run Text="A longer delay leaves the GPU more room next to games and VR."/>
+                            <Hyperlink Click="AiVoiceLog_Click"><Run Text="Open the AI voice log"/></Hyperlink>
+                        </TextBlock>
                         <TextBlock Text="Stop all sounds hotkey" FontSize="11"
                                    Foreground="{StaticResource SubtleTextBrush}" Margin="0,12,0,0"/>
                         <TextBox x:Name="txtStopAllHotkey" IsReadOnly="True" Text="Ctrl+Alt+0"
@@ -183,6 +200,7 @@
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
                     <RowDefinition Height="*"/>
                 </Grid.RowDefinitions>
                 <GroupBox Grid.Row="0" Header="DEVICES">
@@ -270,7 +288,40 @@
                     </StackPanel>
                 </GroupBox>
 
-                <GroupBox Grid.Row="3" Header="CLEAN-UP" Margin="0">
+                <GroupBox Grid.Row="3" Header="VOICE">
+                    <StackPanel>
+                        <DockPanel>
+                            <TextBlock x:Name="lblAiVoiceDelay" DockPanel.Dock="Right" FontSize="11"
+                                       Foreground="{StaticResource SubtleTextBrush}"/>
+                            <CheckBox x:Name="chkAiVoice" Content="AI voice"
+                                      Checked="AiVoice_Changed" Unchecked="AiVoice_Changed"
+                                      ToolTip="Speaks with the voice of a voice model you load (RVC, converted to ONNX). Adds a fixed delay; runs best on an NVIDIA GPU."/>
+                        </DockPanel>
+                        <DockPanel Margin="0,4,0,4">
+                            <Button x:Name="btnAiVoiceLoad" DockPanel.Dock="Right" Content="Load…" Padding="8,2"
+                                    Style="{StaticResource SubtleButton}" Click="AiVoiceLoad_Click"
+                                    ToolTip="Choose a voice model file (.onnx). Only use voices you have the right to use."/>
+                            <TextBlock x:Name="txtAiVoiceModel" Text="No voice model" VerticalAlignment="Center"
+                                       TextTrimming="CharacterEllipsis" Margin="0,0,8,0"
+                                       ToolTip="{Binding Text, RelativeSource={RelativeSource Self}}"/>
+                        </DockPanel>
+                        <DockPanel>
+                            <TextBlock x:Name="lblAiVoicePitch" DockPanel.Dock="Right" Text="0 st" FontSize="11"
+                                       Foreground="{StaticResource SubtleTextBrush}"/>
+                            <TextBlock Text="Pitch" FontSize="11" Foreground="{StaticResource SubtleTextBrush}"/>
+                        </DockPanel>
+                        <Slider x:Name="sliderAiVoicePitch" Minimum="-24" Maximum="24" Value="0"
+                                TickFrequency="1" IsSnapToTickEnabled="True"
+                                ValueChanged="AiVoicePitch_Changed" Margin="0,2,0,0"
+                                ToolTip="Moves your voice into the model's range, in semitones: about +12 from a low voice to a high model, -12 the other way."/>
+                        <TextBlock x:Name="txtAiVoiceStatus" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0"
+                                   Foreground="{StaticResource SubtleTextBrush}" Visibility="Collapsed"/>
+                        <ProgressBar x:Name="progressAiVoice" Minimum="0" Maximum="1" Margin="0,4,0,0"
+                                     Visibility="Collapsed"/>
+                    </StackPanel>
+                </GroupBox>
+
+                <GroupBox Grid.Row="4" Header="CLEAN-UP" Margin="0">
                     <StackPanel>
                         <DockPanel>
                             <TextBlock x:Name="lblDenoise" DockPanel.Dock="Right" Text="18 dB" FontSize="11"

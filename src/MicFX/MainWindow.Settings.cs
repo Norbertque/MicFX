@@ -39,6 +39,7 @@ public partial class MainWindow
             }
         }
         engine.SetLatencyMode(settings.LatencyMode);
+        ApplyAiVoiceSettingsToUi();
 
 
         foreach (var clip in settings.Sounds)
@@ -112,6 +113,8 @@ public partial class MainWindow
         settings.CompressorAmount = (float)sliderComp.Value;
         settings.EqBandCount = eqFrequencies.Length;
         settings.LatencyMode = CurrentLatencyMode();
+        settings.AiVoiceEnabled = chkAiVoice.IsChecked == true;
+        settings.AiVoicePitch = (float)sliderAiVoicePitch.Value;
         settings.ActiveProfile = comboProfile.SelectedItem as string;
         settings.Sounds = sounds
             .Select(s => new SoundClipSetting
@@ -159,6 +162,9 @@ public partial class MainWindow
         CompressorEnabled = chkComp.IsChecked == true,
         CompressorAmount = (float)sliderComp.Value,
         EqGainsDb = eqSliders.Select(s => (float)s.Value).ToArray(),
+        AiVoiceEnabled = chkAiVoice.IsChecked == true,
+        AiVoiceModelPath = settings.AiVoiceModelPath,
+        AiVoicePitch = (float)sliderAiVoicePitch.Value,
     };
 
     private void ApplyProfile(Profile p)
@@ -179,6 +185,7 @@ public partial class MainWindow
         var profileGains = MapGainsToBands(p.EqGainsDb, eqFrequencies);
         for (int i = 0; i < eqSliders.Count && i < profileGains.Length; i++)
             eqSliders[i].Value = profileGains[i];
+        ApplyProfileAiVoice(p);
         txtStatus.Text = $"Profile \"{p.Name}\" applied.";
     }
 

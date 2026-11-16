@@ -13,7 +13,7 @@ namespace MicFX;
 /// </summary>
 public static class Theme
 {
-    public const string DefaultAccent = "#7C5CFF";
+    public const string DefaultAccent = Models.AppSettings.DefaultAccentColor;
 
     /// <summary>Mid-tone colors that all keep white text readable on buttons.</summary>
     public static readonly (string Name, string Hex)[] Presets =

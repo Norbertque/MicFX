@@ -22,6 +22,7 @@ public partial class MainWindow
     private readonly MicActivityProbe probe = new();
     private string? activeInputId;
     private string runningStatus = "";
+    private string runningDevices = "";
 
     // Active capture devices for the once-a-second auto-switch check. Rebuilt
     // by PopulateDevices; any device notification marks it stale at once (the
@@ -214,9 +215,8 @@ public partial class MainWindow
             ApplyMonitor();
             btnStartStop.Content = "Stop";
             SetStatusDot("running");
-            runningStatus = $"Running — {mic.Name}  →  {render.Name}  (~{engine.EstimatedLatencyMs} ms)";
-            if (engine.CaptureNote != null)
-                runningStatus += $"  ({engine.CaptureNote})";
+            runningDevices = $"{mic.Name}  →  {render.Name}";
+            runningStatus = BuildRunningStatus();
             txtStatus.Text = runningStatus;
         }
         catch (Exception ex)
@@ -228,6 +228,22 @@ public partial class MainWindow
             SetStatusDot("error");
             txtStatus.Text = "Error: " + ex.Message;
         }
+    }
+
+    private string BuildRunningStatus()
+    {
+        string status = $"Running — {runningDevices}  (~{engine.EstimatedLatencyMs} ms)";
+        if (engine.CaptureNote != null) status += $"  ({engine.CaptureNote})";
+        return status;
+    }
+
+    /// <summary>Updates the delay shown in the status line, e.g. after the AI voice was switched.</summary>
+    private void RefreshRunningStatus()
+    {
+        if (!engine.IsRunning || runningDevices.Length == 0) return;
+        bool showing = txtStatus.Text == runningStatus;
+        runningStatus = BuildRunningStatus();
+        if (showing) txtStatus.Text = runningStatus;
     }
 
     /// <summary>

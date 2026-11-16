@@ -134,8 +134,17 @@ public class CudaLibraryProbe
         Assert.Null(OrtNative.LoadCudaLibraries(downloader.FolderOf(AiVoiceFiles.Cuda)));
         string runtime = downloader.FolderOf(AiVoiceFiles.Runtime);
         System.Runtime.InteropServices.NativeLibrary.Load(Path.Combine(runtime, "onnxruntime_providers_shared.dll"));
-        System.Runtime.InteropServices.NativeLibrary.Load(Path.Combine(runtime, "onnxruntime_providers_cuda.dll"));
-        // No GPU on the runner, so this says why; it must not be a missing library.
-        Assert.NotNull(OrtNative.CheckDriver());
+        // Without an NVIDIA driver the CUDA provider's start-up code fails (0x8007045A,
+        // "initialization routine failed"); that still proves every library it imports
+        // was found. A missing one would be 0x8007007E ("module not found").
+        try
+        {
+            System.Runtime.InteropServices.NativeLibrary.Load(Path.Combine(runtime, "onnxruntime_providers_cuda.dll"));
+        }
+        catch (DllNotFoundException ex) when (OrtNative.CheckDriver() != null)
+        {
+            Assert.DoesNotContain("0x8007007E", ex.Message);
+            Assert.Contains("0x8007045A", ex.Message);
+        }
     }
 }

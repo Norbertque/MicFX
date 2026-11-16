@@ -35,10 +35,17 @@ public class Profile
     public bool CompressorEnabled { get; set; }
     public float CompressorAmount { get; set; } = 50f;
     public float[] EqGainsDb { get; set; } = new float[10];
+    public bool AiVoiceEnabled { get; set; }
+    /// <summary>Voice model (.onnx) the profile uses; null keeps whatever is loaded.</summary>
+    public string? AiVoiceModelPath { get; set; }
+    public float AiVoicePitch { get; set; }
 }
 
 public class AppSettings
 {
+    /// <summary>Violet, the first theme swatch.</summary>
+    public const string DefaultAccentColor = "#7C5CFF";
+
     public string? InputDeviceId { get; set; }
     public string? InputDeviceName { get; set; }
     /// <summary>Optional mic that takes over automatically whenever it is connected.</summary>
@@ -74,9 +81,20 @@ public class AppSettings
     /// <summary>Global hotkey that stops every clip; 0/0 = the default Ctrl+Alt+0.</summary>
     public uint StopAllHotkeyMods { get; set; }
     public uint StopAllHotkeyVk { get; set; }
-    public string AccentColor { get; set; } = Theme.DefaultAccent;
+    public string AccentColor { get; set; } = DefaultAccentColor;
+    public bool AiVoiceEnabled { get; set; }
+    public string? AiVoiceModelPath { get; set; }
+    /// <summary>Pitch shift in semitones before the voice model.</summary>
+    public float AiVoicePitch { get; set; }
+    /// <summary>"Cuda" (NVIDIA GPU) or "Cpu".</summary>
+    public string AiVoiceBackend { get; set; } = "Cuda";
+    /// <summary>"Short", "Normal" or "Safe" (see AiVoiceDelay).</summary>
+    public string AiVoiceDelay { get; set; } = "Normal";
+    /// <summary>The user accepted NVIDIA's license for the CUDA and cuDNN downloads.</summary>
+    public bool AiVoiceNvidiaAccepted { get; set; }
 
-    private static string SettingsDir =>
+    /// <summary>Where MicFX keeps its settings and downloads (%APPDATA%\MicFX).</summary>
+    public static string SettingsDir =>
         System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MicFX");
 
     private static string SettingsPath => System.IO.Path.Combine(SettingsDir, "settings.json");

@@ -79,6 +79,7 @@ public partial class MainWindow : Window
         menuPopup.Closed += (_, _) => RefreshHotkeys();
         StartSpectrumTimer();
         TryAutoStart();
+        Dispatcher.BeginInvoke(ResumeAiVoice, DispatcherPriority.Background);
         CheckCableSetup();
         PrepareClips();
         _ = CheckForUpdatesAsync();
@@ -115,6 +116,7 @@ public partial class MainWindow : Window
             probe.Dispose();
             hotkeys?.Dispose();
             engine.Dispose();
+            aiHost?.Dispose();
             if (trayIcon != null)
             {
                 trayIcon.Visible = false;

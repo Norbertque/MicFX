@@ -11,9 +11,9 @@ public readonly record struct LevelReport(float InputDb, float OutputDb, bool In
 /// Owns the whole real-time graph:
 ///
 ///   mic capture → drift guard → resample → noise suppression → gain → meter
-///     → gate → EQ → spectrum tap → compressor → (mono→stereo) → tee ─┐
-///                                                                    ├→ master → limiter → meter → output
-///   soundboard clips → sub-mixer → soundboard volume → tee ──────────┘
+///     → gate → AI voice → EQ → spectrum tap → compressor → (mono→stereo) → tee ─┐
+///                                                                               ├→ master → limiter → meter → output
+///   soundboard clips → sub-mixer → soundboard volume → tee ─────────────────────┘
 ///
 /// The two tees feed the monitor output through independent volume controls,
 /// so the user can hear the soundboard loudly while keeping their own voice
@@ -49,6 +49,7 @@ public class AudioEngine : IDisposable
     private RnNoiseSampleProvider? aiDenoise;
     private NoiseSuppressionSampleProvider? denoise;
     private NoiseGateSampleProvider? gate;
+    private AiVoiceSampleProvider? aiVoice;
     private EqualizerSampleProvider? eq;
     private SpectrumTapSampleProvider? spectrumTap;
     private CompressorSampleProvider? compressor;
@@ -66,6 +67,8 @@ public class AudioEngine : IDisposable
     private float[] eqGains = new float[10];
     private int eqBandCount = 10;
     private bool gateEnabled;
+    private bool aiVoiceEnabled;
+    private VoiceStream? aiVoiceStream;
     private float gateThresholdDb = -45f;
     private bool denoiseEnabled;
     private float denoiseStrengthDb = 18f;
@@ -117,6 +120,8 @@ public class AudioEngine : IDisposable
                 total += denoiseMode == "Ai" && RnNoiseSampleProvider.IsAvailable
                     ? RnNoiseSampleProvider.AlgorithmicDelay * 1000 / SampleRate  // 20 ms
                     : 5;                                                          // spectral hop
+            var stream = aiVoiceStream;
+            if (aiVoiceEnabled && stream != null) total += stream.Timing.Delay * 1000 / SampleRate;
             return total;
         }
     }
@@ -201,7 +206,8 @@ public class AudioEngine : IDisposable
         };
 
         gate = new NoiseGateSampleProvider(inputMeter) { Enabled = gateEnabled, ThresholdDb = gateThresholdDb };
-        eq = new EqualizerSampleProvider(gate, eqBandCount, eqGains);
+        aiVoice = new AiVoiceSampleProvider(gate) { Enabled = aiVoiceEnabled, Stream = aiVoiceStream };
+        eq = new EqualizerSampleProvider(aiVoice, eqBandCount, eqGains);
         spectrumTap = new SpectrumTapSampleProvider(eq);
         compressor = new CompressorSampleProvider(spectrumTap) { Enabled = compEnabled };
         compressor.SetAmount(compAmount);
@@ -415,6 +421,7 @@ public class AudioEngine : IDisposable
         aiDenoise = null;
         denoise = null;
         gate = null;
+        aiVoice = null;
         eq = null;
         spectrumTap = null;
         compressor = null;
@@ -440,6 +447,21 @@ public class AudioEngine : IDisposable
     {
         soundVol = value;
         if (soundboardVolume != null) soundboardVolume.Volume = value;
+    }
+
+    /// <summary>
+    /// The AI voice: on/off and the stream to play through (null while the model
+    /// loads, which is silent). Both change smoothly while audio runs.
+    /// </summary>
+    public void SetAiVoice(bool enabled, VoiceStream? stream)
+    {
+        aiVoiceEnabled = enabled;
+        aiVoiceStream = stream;
+        if (aiVoice != null)
+        {
+            aiVoice.Stream = stream;
+            aiVoice.Enabled = enabled;
+        }
     }
 
     public void SetGate(bool enabled, float thresholdDb)
