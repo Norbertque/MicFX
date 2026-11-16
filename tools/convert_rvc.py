@@ -24,9 +24,9 @@ only over the `return_length` frames from `skip_head` on.
     return_length int64   [1]
     audio         float32 [1, 1, return_length * sr / 100]
 
-Metadata key "metadata": JSON with samplingRate, f0, embChannels, version,
-format = "micfx-rvc-1" and frames (the frame count T the graph was traced
-with; other lengths are checked below and the result printed).
+RVC's attention layers fix T at export (to 128 frames, 1.28 s); return_length
+can be anything up to T - 24. Metadata key "metadata": JSON with samplingRate,
+f0, embChannels, version, format = "micfx-rvc-1" and frames = T.
 
 Needs torch, numpy, scipy, onnx and onnxruntime.
 """
@@ -213,7 +213,7 @@ def main(argv):
     report = []
     torch.randn_like = lambda x, *a, **k: torch.zeros_like(x)
     try:
-        for frames, ret in [(TRACE_FRAMES, 16), (TRACE_FRAMES, 21), (100, 16), (160, 31)]:
+        for frames, ret in [(TRACE_FRAMES, r) for r in (11, 16, 21, 27)]:
             feeds = inputs(dim, frames, uses_pitch, frames - ret, ret, seed=frames + ret)
             with torch.no_grad():
                 ref = model(*(torch.from_numpy(feeds[n]) for n in names)).numpy()
