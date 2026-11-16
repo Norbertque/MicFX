@@ -50,3 +50,8 @@ end;
 
 [UninstallRun]
 ; nothing — settings in %APPDATA%\MicFX are left in place on purpose
+
+[UninstallDelete]
+; The AI voice downloads (ONNX Runtime, helper models, NVIDIA libraries; up to
+; about 1.6 GB) can be fetched again, so they go; settings stay.
+Type: filesandordirs; Name: "{userappdata}\MicFX\ai"

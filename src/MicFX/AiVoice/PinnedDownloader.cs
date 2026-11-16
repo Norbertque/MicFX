@@ -218,5 +218,5 @@ public sealed class PinnedDownloader
         }
     }
 
-    internal static string Mb(long bytes) => $"{bytes / (1024.0 * 1024.0):F0} MB";
+    internal static string Mb(long bytes) => $"{bytes / 1e6:F0} MB";
 }

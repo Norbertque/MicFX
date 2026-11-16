@@ -51,6 +51,8 @@ public static class AiVoiceFiles
                     new ArchiveMember("runtimes/win-x64/native/onnxruntime.dll", "onnxruntime.dll", 21034296, "482ef0ced4d3dd035e61066e8672bae02b32ab835dc49a2ffc154809c94149c6"),
                     new ArchiveMember("runtimes/win-x64/native/onnxruntime_providers_shared.dll", "onnxruntime_providers_shared.dll", 21816, "c65bec36d453ae3439c6eeac993d6c989c1328a0ae11e079c9cdd9f7fbc6eec9"),
                     new ArchiveMember("runtimes/win-x64/native/onnxruntime_providers_cuda.dll", "onnxruntime_providers_cuda.dll", 195548512, "a101b256c0dc39280542b517d911e006bde3719aaf5b3e7ad8b5af74642b967f"),
+                    new ArchiveMember("LICENSE", "LICENSE-onnxruntime.txt", 1094, "c250d6278f0b47a6439fb7592b08b58a55eb9f535aa49a1db63211c3f982b674"),
+                    new ArchiveMember("ThirdPartyNotices.txt", "ThirdPartyNotices-onnxruntime.txt", 341120, "bf8073fd6a112ac2a656bb60799652127e881689e51d37ad20df446cd5188b2d"),
                 }),
         });
 

@@ -2,6 +2,20 @@ MicFX includes the following third-party software. Each is used under its
 own license, reproduced below. MicFX itself is licensed under the GNU
 General Public License v3.0 or later; see LICENSE.
 
+Additional permission under GNU GPL version 3 section 7
+
+If you modify this Program, or any covered work, by linking or combining
+it with the NVIDIA CUDA and cuDNN runtime libraries, or with ONNX Runtime
+including its CUDA execution provider (onnxruntime.dll,
+onnxruntime_providers_shared.dll, onnxruntime_providers_cuda.dll), or with
+modified versions of those libraries, containing parts covered by the
+terms of their licenses, the licensors of this Program grant you
+additional permission to convey the resulting work.
+
+In plain words: the GPL of MicFX does not extend to those libraries. MicFX
+does not include the NVIDIA libraries or the native ONNX Runtime; it
+downloads them on first use of the AI voice (see below).
+
 ========================================================================
 NAudio 2.2.1
 https://github.com/naudio/NAudio
@@ -92,3 +106,154 @@ components, listed with their licenses at:
 https://github.com/dotnet/runtime/blob/main/THIRD-PARTY-NOTICES.TXT
 https://github.com/dotnet/wpf/blob/main/THIRD-PARTY-NOTICES.TXT
 https://github.com/dotnet/winforms/blob/main/THIRD-PARTY-NOTICES.TXT
+
+========================================================================
+ONNX Runtime 1.32.0
+https://github.com/microsoft/onnxruntime
+========================================================================
+
+MicFX.exe includes the managed ONNX Runtime API
+(Microsoft.ML.OnnxRuntime.dll). The native runtime is not included: when
+the AI voice is first used, MicFX downloads Microsoft's NuGet package
+Microsoft.ML.OnnxRuntime.Gpu.Windows 1.32.0 from nuget.org, checks its
+SHA-256 and keeps onnxruntime.dll, onnxruntime_providers_shared.dll,
+onnxruntime_providers_cuda.dll, the license and the package's
+ThirdPartyNotices.txt in %APPDATA%\MicFX\ai.
+
+MIT License
+
+Copyright (c) Microsoft Corporation
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+========================================================================
+Retrieval-based-Voice-Conversion-WebUI (RVC)
+https://github.com/RVC-Project/Retrieval-based-Voice-Conversion-WebUI
+========================================================================
+
+The AI voice follows RVC's real-time inference: block streaming with SOLA
+joins (realtime_gui.py, infer/lib/rtrvc.py), content feature and pitch
+handling and the coarse pitch scale. MicFX reimplements these in C#.
+tools/convert_rvc.py downloads RVC's model code from a pinned commit to
+convert voice models; it is not part of MicFX.exe.
+
+MIT License
+
+Copyright (c) 2023 liujing04
+Copyright (c) 2023 源文雨
+Copyright (c) 2023 Ftps
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+========================================================================
+ContentVec
+https://github.com/auspicious3000/contentvec
+https://huggingface.co/lengyue233/content-vec-best (Transformers conversion)
+========================================================================
+
+contentvec.onnx, downloaded by MicFX on first use of the AI voice from the
+models-1 pre-release of MicFX, is ContentVec exported to ONNX by
+tools/export_contentvec.py from the Transformers conversion above (also
+MIT licensed).
+
+MIT License
+
+Copyright (c) 2019
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+========================================================================
+FCPE (torchfcpe 0.0.4)
+https://github.com/CNChTu/FCPE
+========================================================================
+
+fcpe.onnx, downloaded by MicFX on first use of the AI voice from the
+models-1 pre-release of MicFX, is torchfcpe's bundled pitch model exported
+to ONNX by tools/export_fcpe.py.
+
+MIT License
+
+Copyright (c) 2023 CN_ChiTu
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+========================================================================
+NVIDIA CUDA 13.0 and cuDNN 9.16 runtime libraries (not distributed)
+https://developer.download.nvidia.com/compute/cuda/redist/
+https://developer.download.nvidia.com/compute/cudnn/redist/
+========================================================================
+
+MicFX does not include or distribute these libraries. Only when the user
+chooses to run the AI voice on an NVIDIA GPU and accepts NVIDIA's license,
+MicFX downloads NVIDIA's redistributable archives (cuda_cudart 13.0.96,
+libcublas 13.1.1.3, cuda_nvrtc 13.0.88, cudnn 9.16.0.29 for CUDA 13)
+directly from NVIDIA, checks their SHA-256 and keeps the runtime libraries
+and NVIDIA's license files (LICENSE-CUDA.txt, LICENSE-cuDNN.txt) in
+%APPDATA%\MicFX\ai. They are NVIDIA's proprietary software, licensed by
+NVIDIA to the user:
+https://docs.nvidia.com/cuda/eula/index.html
+https://docs.nvidia.com/deeplearning/cudnn/latest/reference/eula.html

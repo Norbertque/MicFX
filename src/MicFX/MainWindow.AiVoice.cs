@@ -207,7 +207,7 @@ public partial class MainWindow
     private MessageBoxResult ConfirmAiDownloads(IReadOnlyList<FileSet> missing)
     {
         bool nvidia = missing.Any(s => s.Folder == AiVoiceFiles.Cuda.Folder);
-        var lines = missing.Select(s => $"  •  {s.Title}: {s.DownloadSize / (1024 * 1024)} MB");
+        var lines = missing.Select(s => $"  •  {s.Title}: {s.DownloadSize / 1_000_000} MB");
         string text = "The AI voice needs these downloads, once:\n\n" + string.Join("\n", lines) +
                       $"\n\nThey are saved in {Path.Combine(AppSettings.SettingsDir, "ai")}.";
         if (nvidia)
@@ -237,7 +237,7 @@ public partial class MainWindow
                 var progress = new Progress<DownloadProgress>(p =>
                 {
                     progressAiVoice.Value = p.Total > 0 ? (double)p.Done / p.Total : 0;
-                    ShowAiStatus($"Downloading {set.Title}: {p.Done / (1024 * 1024)} of {p.Total / (1024 * 1024)} MB", warn: false);
+                    ShowAiStatus($"Downloading {set.Title}: {p.Done / 1_000_000} of {p.Total / 1_000_000} MB", warn: false);
                 });
                 await host.InstallAsync(new[] { set }, progress, aiDownloadCancel.Token);
             }
