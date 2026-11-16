@@ -127,6 +127,7 @@ public sealed class VoiceStream : IDisposable
 
     private Thread? thread;
     private volatile bool stopping;
+    private readonly TaskCompletionSource exited = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     public VoiceStream(VoiceTiming timing, IVoiceConverter converter)
     {
@@ -491,11 +492,25 @@ public sealed class VoiceStream : IDisposable
 
     private void WorkerLoop()
     {
-        while (!stopping)
+        try
         {
-            if (!TryStep()) wake.WaitOne(100);
+            while (!stopping)
+            {
+                if (!TryStep()) wake.WaitOne(100);
+            }
+        }
+        finally
+        {
+            exited.TrySetResult();
         }
     }
+
+    /// <summary>
+    /// Completes when the worker thread has stopped (at once if it never started).
+    /// The model may only be disposed after this: a call can still be running after
+    /// <see cref="Dispose"/> returns.
+    /// </summary>
+    public Task WorkerExited => thread == null ? Task.CompletedTask : exited.Task;
 
     /// <summary>Stops the worker. Never blocks for long: a model call still running finishes in the background.</summary>
     public void Dispose()

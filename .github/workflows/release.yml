@@ -13,6 +13,10 @@ on:
         description: 'Build and test only, do not publish'
         type: boolean
         default: false
+      cuda_probe:
+        description: 'Also download the pinned ONNX Runtime and NVIDIA libraries and check they load (about 1.2 GB)'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -71,6 +75,7 @@ jobs:
         shell: pwsh
         env:
           MICFX_REQUIRE_RNNOISE: '1'
+          MICFX_CUDA_PROBE: ${{ inputs.cuda_probe && '1' || '' }}
         run: dotnet test tests/MicFX.Tests/MicFX.Tests.csproj -c Release
 
       - name: Verify RNNoise is embedded

@@ -220,6 +220,9 @@ public sealed class OnnxVoiceGenerator : IVoiceGenerator, IDisposable
         }
     }
 
+    /// <summary>Asks a running call to stop (it then throws). Safe from any thread.</summary>
+    public void Cancel() => run.Terminate = true;
+
     public void Dispose()
     {
         run.Terminate = true;

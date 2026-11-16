@@ -43,6 +43,9 @@ public sealed class OnnxContentEncoder : IContentEncoder, IDisposable
         result.Slice(0, features.Length).CopyTo(features);
     }
 
+    /// <summary>Asks a running call to stop (it then throws). Safe from any thread.</summary>
+    public void Cancel() => run.Terminate = true;
+
     public void Dispose()
     {
         run.Terminate = true;
@@ -87,6 +90,9 @@ public sealed class OnnxPitchExtractor : IPitchExtractor, IDisposable
             throw new InvalidOperationException($"Pitch extractor returned {result.Length} frames, expected {f0.Length}.");
         result.CopyTo(f0);
     }
+
+    /// <summary>Asks a running call to stop (it then throws). Safe from any thread.</summary>
+    public void Cancel() => run.Terminate = true;
 
     public void Dispose()
     {
