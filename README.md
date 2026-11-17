@@ -139,7 +139,7 @@ switched off, the model is unloaded to free GPU memory.
 ### Getting a voice model
 
 MicFX runs RVC v1 and v2 models (32, 40 or 48 kHz, with or without pitch) in
-ONNX format. To make one:
+ONNX format. To make one from a .pth:
 
 1. Train a model of your own voice, or of a voice you have permission to
    use, with the [RVC WebUI](https://github.com/RVC-Project/Retrieval-based-Voice-Conversion-WebUI).
@@ -161,11 +161,12 @@ ONNX format. To make one:
    PyTorch.
 3. In MicFX: VOICE > Load..., choose `myvoice.onnx`, tick AI voice.
 
-MicFX also recognises the ONNX exports of older RVC WebUI versions and of
-w-okada's voice changer, but they have only been tested with stand-in files,
-not real ones. They cannot skip their context the way converted models do, so
-they would cost more GPU time per block; converting the .pth is the tested
-route.
+Models exported to ONNX by [Applio](https://github.com/IAHispano/Applio)
+(often published next to the .pth) load directly, without converting; a
+converted .pth costs somewhat less GPU time per block, because MicFX's format
+skips more of the context. MicFX also recognises the ONNX exports of older
+RVC WebUI versions and of w-okada's voice changer, but those have only been
+tested with stand-in files, not real ones.
 
 ### Using it
 
@@ -266,7 +267,7 @@ src/MicFX/
     PinnedDownloader.cs          resumable, checked downloads and extraction
     OrtNative.cs                 loads ONNX Runtime and the NVIDIA libraries by full path
     OnnxHelperModels.cs          ContentVec and FCPE sessions
-    OnnxVoiceGenerator.cs        RVC voice model sessions (three ONNX formats)
+    OnnxVoiceGenerator.cs        RVC voice model sessions (four ONNX formats)
     OnnxSessions.cs              CUDA/CPU session options
   Models/AppSettings.cs          JSON persistence, profiles
   Models/SoundLibrary.cs         MicFX's own copies of soundboard clips

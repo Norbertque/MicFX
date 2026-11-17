@@ -7,6 +7,20 @@
 The binaries are unsigned, so SmartScreen may warn on first run
 (More info > Run anyway). In-app updates are not affected.
 
+### AI voice fixes
+
+- The AI voice stopped after a moment with real speech ("The AI voice
+  stopped: ... Gather ... out of data bounds"). The pitch tracker reports
+  frames it is unsure about (pauses, breaths) as not-a-number, which the
+  voice model cannot take; those frames now count as unvoiced. Found by
+  running recorded speech through a trained voice model: the converted voice
+  now follows the speaker's pitch within a semitone in 94% of voiced frames,
+  with no clicks between blocks.
+- Voice models exported to ONNX by Applio load directly, without converting
+  the .pth first.
+
+1.12.0 added the AI voice; its notes follow.
+
 ### AI voice
 
 New VOICE card: speak with the voice of an RVC voice model you load, live,

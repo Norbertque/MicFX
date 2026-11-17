@@ -17,13 +17,18 @@ public enum RvcDialect
 
     /// <summary>w-okada voice-changer's export (feats, p_len, pitch, pitchf, sid).</summary>
     WOkada,
+
+    /// <summary>Applio's export (phone, phone_lengths, sid, rate, pitch, nsff0): returns the last rate x T frames.</summary>
+    Applio,
 }
 
 /// <summary>
 /// An RVC voice model in ONNX. Files from tools/convert_rvc.py run exactly as
-/// RVC's real-time code does; the other two exports have no way to skip the
-/// context, so they are given the last 24 context frames plus the returned
-/// frames and the returned part is cut from their output.
+/// RVC's real-time code does. Applio's export can return only the newest
+/// frames (its rate input), so it is asked for the returned frames plus 24 of
+/// context for the flow. The old WebUI and w-okada exports have no way to
+/// skip the context, so they are given the last 24 context frames plus the
+/// returned frames, and the returned part is cut from their output.
 /// </summary>
 public sealed class OnnxVoiceGenerator : IVoiceGenerator, IDisposable
 {
@@ -32,7 +37,7 @@ public sealed class OnnxVoiceGenerator : IVoiceGenerator, IDisposable
 
     private readonly InferenceSession session;
     private readonly RunOptions run = new();
-    private readonly string featureName, lengthName, speakerName;
+    private readonly string featureName, lengthName, speakerName, pitchName;
     private readonly bool halfFeatures, halfPitch;
     private readonly string[] outputNames;
     private ulong rng = 0x9E3779B97F4A7C15UL;
@@ -51,6 +56,7 @@ public sealed class OnnxVoiceGenerator : IVoiceGenerator, IDisposable
     private readonly long[] speaker = new long[1];
     private readonly long[] skip = new long[1];
     private readonly long[] ret = new long[1];
+    private readonly float[] rate = new float[1];
 
     public OnnxVoiceGenerator(string path, SessionOptions options)
     {
@@ -59,16 +65,18 @@ public sealed class OnnxVoiceGenerator : IVoiceGenerator, IDisposable
         string file = Path.GetFileName(path);
 
         if (inputs.ContainsKey("phone") && inputs.ContainsKey("skip_head")) Dialect = RvcDialect.MicFx;
+        else if (inputs.ContainsKey("phone") && inputs.ContainsKey("rate")) Dialect = RvcDialect.Applio;
         else if (inputs.ContainsKey("phone") && inputs.ContainsKey("rnd")) Dialect = RvcDialect.WebUi;
         else if (inputs.ContainsKey("feats") && inputs.ContainsKey("p_len")) Dialect = RvcDialect.WOkada;
         else throw new InvalidDataException($"{file} is not an RVC voice model in a known ONNX format (inputs: {string.Join(", ", inputs.Keys)}).");
 
         featureName = Dialect == RvcDialect.WOkada ? "feats" : "phone";
         lengthName = Dialect == RvcDialect.WOkada ? "p_len" : "phone_lengths";
-        speakerName = Dialect == RvcDialect.WOkada ? "sid" : "ds";
-        UsesPitch = inputs.ContainsKey("pitchf");
+        speakerName = Dialect is RvcDialect.WOkada or RvcDialect.Applio ? "sid" : "ds";
+        pitchName = Dialect == RvcDialect.Applio ? "nsff0" : "pitchf";
+        UsesPitch = inputs.ContainsKey(pitchName);
         halfFeatures = inputs[featureName].ElementType == typeof(Float16);
-        halfPitch = UsesPitch && inputs["pitchf"].ElementType == typeof(Float16);
+        halfPitch = UsesPitch && inputs[pitchName].ElementType == typeof(Float16);
         outputNames = new[] { session.OutputMetadata.Keys.First() };
 
         var meta = ReadMetadata(session);
@@ -93,7 +101,8 @@ public sealed class OnnxVoiceGenerator : IVoiceGenerator, IDisposable
     {
         int total = features.Length / FeatureDim;
         int perFrame = SampleRate / 100;
-        int start = Dialect == RvcDialect.MicFx ? 0 : Math.Max(0, skipHead - WindowContextFrames);
+        bool skips = Dialect is RvcDialect.MicFx or RvcDialect.Applio;
+        int start = skips ? 0 : Math.Max(0, skipHead - WindowContextFrames);
         int frames = total - start;
         Prepare(frames);
 
@@ -107,14 +116,22 @@ public sealed class OnnxVoiceGenerator : IVoiceGenerator, IDisposable
             if (halfPitch)
                 for (int i = 0; i < pitchf.Length; i++) pitchfHalf[i] = (Float16)pitchf[i];
         }
-        if (Dialect != RvcDialect.WOkada) FillNoise(noise);
+        if (Dialect is RvcDialect.MicFx or RvcDialect.WebUi) FillNoise(noise);
         skip[0] = skipHead - start;
         ret[0] = returnFrames;
+        // Applio keeps the last int(T * rate) frames; ask for half a frame more so rounding never loses one.
+        int wanted = total - Math.Max(0, skipHead - WindowContextFrames);
+        rate[0] = Math.Min(1f, (wanted + 0.5f) / total);
 
         using var outputs = session.Run(run, inputNames, inputValues, outputNames);
         var result = outputs[0].GetTensorDataAsSpan<float>();
-        int offset = Dialect == RvcDialect.MicFx ? 0 : (skipHead - start) * perFrame;
-        if (result.Length < offset + audio.Length)
+        int offset = Dialect switch
+        {
+            RvcDialect.MicFx => 0,
+            RvcDialect.Applio => (skipHead - (total - result.Length / perFrame)) * perFrame, // output is the last frames
+            _ => (skipHead - start) * perFrame,
+        };
+        if (offset < 0 || result.Length < offset + audio.Length)
             throw new InvalidOperationException($"The voice model returned {result.Length} samples, expected {offset + audio.Length}.");
         result.Slice(offset, audio.Length).CopyTo(audio);
     }
@@ -144,10 +161,11 @@ public sealed class OnnxVoiceGenerator : IVoiceGenerator, IDisposable
         if (UsesPitch)
         {
             Add("pitch", OnnxSessions.Tensor(pitch, 1, frames));
-            Add("pitchf", halfPitch ? OnnxSessions.Tensor(pitchfHalf, 1, frames) : OnnxSessions.Tensor(pitchf, 1, frames));
+            Add(pitchName, halfPitch ? OnnxSessions.Tensor(pitchfHalf, 1, frames) : OnnxSessions.Tensor(pitchf, 1, frames));
         }
         Add(speakerName, OnnxSessions.Tensor(speaker, 1));
-        if (Dialect != RvcDialect.WOkada) Add("rnd", OnnxSessions.Tensor(noise, 1, 192, frames));
+        if (Dialect is RvcDialect.MicFx or RvcDialect.WebUi) Add("rnd", OnnxSessions.Tensor(noise, 1, 192, frames));
+        if (Dialect == RvcDialect.Applio) Add("rate", OnnxSessions.Tensor(rate, 1));
         if (Dialect == RvcDialect.MicFx)
         {
             Add("skip_head", OnnxSessions.Tensor(skip, 1));
@@ -190,9 +208,10 @@ public sealed class OnnxVoiceGenerator : IVoiceGenerator, IDisposable
                 FillNoise(noise);
                 skip[0] = 0;
                 ret[0] = frames;
+                rate[0] = 1f;
                 using var outputs = session.Run(run, inputNames, inputValues, outputNames);
-                int rate = outputs[0].GetTensorDataAsSpan<float>().Length * 100 / frames;
-                if (rate is 32000 or 40000 or 48000) return rate;
+                int hz = outputs[0].GetTensorDataAsSpan<float>().Length * 100 / frames;
+                if (hz is 32000 or 40000 or 48000) return hz;
             }
             catch (OnnxRuntimeException)
             {
@@ -204,15 +223,19 @@ public sealed class OnnxVoiceGenerator : IVoiceGenerator, IDisposable
 
     private readonly record struct Metadata(int SamplingRate, int EmbChannels, int Frames);
 
+    /// <summary>"metadata" (convert_rvc.py, w-okada) or Applio's "model_info" (sr).</summary>
     private static Metadata ReadMetadata(InferenceSession session)
     {
-        if (!session.ModelMetadata.CustomMetadataMap.TryGetValue("metadata", out var json)) return default;
+        var map = session.ModelMetadata.CustomMetadataMap;
+        if (!map.TryGetValue("metadata", out var json) && !map.TryGetValue("model_info", out json)) return default;
         try
         {
             using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
             int Get(string name) => root.TryGetProperty(name, out var v) && v.TryGetInt32(out int i) ? i : 0;
-            return new Metadata(Get("samplingRate"), Get("embChannels"), Get("frames"));
+            int rateHz = Get("samplingRate");
+            if (rateHz == 0) rateHz = Get("sr");
+            return new Metadata(rateHz, Get("embChannels"), Get("frames"));
         }
         catch (JsonException)
         {

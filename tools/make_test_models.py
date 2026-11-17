@@ -10,6 +10,9 @@ without downloading anything:
                         every frame = pitchf + feats[., 0]
   gen-webui.onnx        old WebUI format, 48 kHz, 256 features, no metadata:
                         every frame = pitchf + phone[., 0] + mean(rnd) * 0
+  gen-applio.onnx       Applio format, 32 kHz, 256 features, sr in "model_info":
+                        returns the last T - floor(T * (1 - rate)) frames,
+                        each = nsff0 + phone[., 0]
   contentvec-tiny.onnx  frame f of both outputs = mean of samples [320 f, 320 f + 400)
   fcpe-tiny.onnx        frame i = 100 + 1000 * mean of samples [160 i, 160 i + 160)
 
@@ -114,6 +117,40 @@ def generator_window(path, half, dim, per, meta):
     save(graph, path, meta)
 
 
+def generator_applio(path):
+    dim, per = 256, 320
+    inputs = [
+        helper.make_tensor_value_info("phone", TensorProto.FLOAT, [1, "T", dim]),
+        helper.make_tensor_value_info("phone_lengths", TensorProto.INT64, [1]),
+        helper.make_tensor_value_info("sid", TensorProto.INT64, [1]),
+        helper.make_tensor_value_info("rate", TensorProto.FLOAT, [1]),
+        helper.make_tensor_value_info("pitch", TensorProto.INT64, [1, "T"]),
+        helper.make_tensor_value_info("nsff0", TensorProto.FLOAT, [1, "T"]),
+    ]
+    nodes = [
+        helper.make_node("Shape", ["phone"], ["shape"]),
+        helper.make_node("Slice", ["shape", "one", "two", "zero"], ["T"]),               # [1] int64
+        helper.make_node("Cast", ["T"], ["Tf"], to=TensorProto.FLOAT),
+        helper.make_node("Sub", ["onef", "rate"], ["keep"]),
+        helper.make_node("Mul", ["Tf", "keep"], ["headf"]),
+        helper.make_node("Floor", ["headf"], ["headfl"]),
+        helper.make_node("Cast", ["headfl"], ["head"], to=TensorProto.INT64),
+        helper.make_node("Slice", ["phone", "zero", "one", "ax2"], ["phone0"]),
+        helper.make_node("Squeeze", ["phone0", "ax2"], ["phone0s"]),
+        helper.make_node("Add", ["nsff0", "phone0s"], ["all"]),
+        helper.make_node("Slice", ["all", "head", "T", "ax1"], ["values"]),
+    ]
+    inits = [const("zero", [0]), const("one", [1]), const("two", [2]), const("ax1", [1]),
+             numpy_helper.from_array(np.array([1.0], np.float32), "onef")]
+    inits += frame_values_to_audio(nodes, "values", per)
+    out = [helper.make_tensor_value_info("audio", TensorProto.FLOAT, [1, 1, "N"])]
+    model = helper.make_model(helper.make_graph(nodes, "gen_applio", inputs, out, inits), opset_imports=OPSET, producer_name="micfx-tests")
+    model.ir_version = 8
+    model.metadata_props.add(key="model_info", value=json.dumps({"model_name": "test", "version": "v1", "sr": 32000, "f0": True}))
+    onnx.checker.check_model(model)
+    onnx.save(model, path)
+
+
 def content_encoder(path):
     inputs = [helper.make_tensor_value_info("audio", TensorProto.FLOAT, [1, "L"])]
     nodes = [
@@ -152,6 +189,7 @@ def main(out_dir):
     generator_window(os.path.join(out_dir, "gen-wokada-half.onnx"), True, 256, 320,
                      {"samplingRate": 32000, "f0": 1, "embChannels": 256, "version": "v1"})
     generator_window(os.path.join(out_dir, "gen-webui.onnx"), None, 256, 480, None)
+    generator_applio(os.path.join(out_dir, "gen-applio.onnx"))
     content_encoder(os.path.join(out_dir, "contentvec-tiny.onnx"))
     pitch_extractor(os.path.join(out_dir, "fcpe-tiny.onnx"))
     for name in sorted(os.listdir(out_dir)):
