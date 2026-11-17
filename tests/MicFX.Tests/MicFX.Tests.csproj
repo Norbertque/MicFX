@@ -30,7 +30,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="Fixtures/*.onnx" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Fixtures/*.onnx;Fixtures/*.index;Fixtures/*.f32" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

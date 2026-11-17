@@ -16,7 +16,12 @@ without downloading anything:
   contentvec-tiny.onnx  frame f of both outputs = mean of samples [320 f, 320 f + 400)
   fcpe-tiny.onnx        frame i = 100 + 1000 * mean of samples [160 i, 160 i + 160)
 
-Usage: python make_test_models.py OUT_DIR   (needs onnx)
+  ivf-full.index        faiss IndexIVFFlat (d 16, 8 lists, nprobe 1), as RVC trains them
+  ivf-sparse.index      the same with most of 64 lists empty (faiss's sparse layout), nprobe 2
+  ivf-queries.f32       20 query vectors (float32, 20 x 16)
+  ivf-*.expected.f32    RVC's index blend of the queries at rate 0.75, computed with faiss
+
+Usage: python make_test_models.py OUT_DIR   (needs onnx; the indexes need faiss-cpu)
 """
 
 import json
@@ -183,6 +188,52 @@ def pitch_extractor(path):
     save(helper.make_graph(nodes, "fcpe_tiny", inputs, outs, inits), path)
 
 
+def indexes(out_dir):
+    import faiss
+    rng = np.random.default_rng(3)
+    d = 16
+    queries = None  # set below: half random, half near the sparse index's vectors
+
+    def blend(index, rate=0.75):
+        # RVC (infer/lib/rtrvc.py): 8 nearest, weights 1/score^2, normalised.
+        flat = index.reconstruct_n(0, index.ntotal)
+        score, ix = index.search(queries, k=8)
+        with np.errstate(divide="ignore", over="ignore"):
+            weight = np.square(1 / score)
+        weight[ix < 0] = 0
+        total = weight.sum(axis=1, keepdims=True)
+        weight = np.divide(weight, total, out=np.zeros_like(weight), where=total > 0)
+        npy = np.sum(flat[np.maximum(ix, 0)] * np.expand_dims(weight, axis=2), axis=1)
+        out = npy * rate + (1 - rate) * queries
+        # Nothing found in the probed lists: RVC would produce NaN; MicFX keeps the feature.
+        out[total[:, 0] == 0] = queries[total[:, 0] == 0]
+        return out.astype(np.float32)
+
+    sparse_train = rng.standard_normal((2000, d)).astype(np.float32)
+    data = rng.standard_normal((300, d)).astype(np.float32)
+    probe = faiss.index_factory(d, "IVF64,Flat")
+    probe.train(sparse_train)
+    probe_centres = probe.quantizer.reconstruct_n(0, 64)
+    queries = np.concatenate([rng.standard_normal((10, d)),
+                              probe_centres[[0, 1, 2, 3, 4, 5, 0, 2, 4, 5]] + 0.1 * rng.standard_normal((10, d))]).astype(np.float32)
+    queries.tofile(os.path.join(out_dir, "ivf-queries.f32"))
+    full = faiss.index_factory(d, "IVF8,Flat")
+    full.train(data)
+    faiss.extract_index_ivf(full).nprobe = 1
+    full.add(data)
+    faiss.write_index(full, os.path.join(out_dir, "ivf-full.index"))
+    blend(full).tofile(os.path.join(out_dir, "ivf-full.expected.f32"))
+
+    sparse = faiss.index_factory(d, "IVF64,Flat")
+    sparse.train(sparse_train)
+    centres = sparse.quantizer.reconstruct_n(0, 64)
+    near = np.concatenate([centres[i] + 0.05 * rng.standard_normal((5 + 3 * i, d)) for i in range(6)]).astype(np.float32)
+    faiss.extract_index_ivf(sparse).nprobe = 2
+    sparse.add(near)
+    faiss.write_index(sparse, os.path.join(out_dir, "ivf-sparse.index"))
+    blend(sparse).tofile(os.path.join(out_dir, "ivf-sparse.expected.f32"))
+
+
 def main(out_dir):
     os.makedirs(out_dir, exist_ok=True)
     generator_micfx(os.path.join(out_dir, "gen-micfx.onnx"))
@@ -192,6 +243,7 @@ def main(out_dir):
     generator_applio(os.path.join(out_dir, "gen-applio.onnx"))
     content_encoder(os.path.join(out_dir, "contentvec-tiny.onnx"))
     pitch_extractor(os.path.join(out_dir, "fcpe-tiny.onnx"))
+    indexes(out_dir)
     for name in sorted(os.listdir(out_dir)):
         print(f"{name:24s} {os.path.getsize(os.path.join(out_dir, name))} bytes")
 
