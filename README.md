@@ -147,10 +147,11 @@ ONNX format. To make one from a .pth:
    the file to convert (not `G_*.pth` from the logs folder, and the `.index`
    file is not used).
 2. Convert it with `tools/convert_rvc.py` from this repository. It needs
-   Python 3.10 or newer:
+   Python 3.11 to 3.14 (ONNX Runtime has no build for 3.15 yet; `py --list`
+   shows which versions are installed):
 
    ```
-   python -m venv rvc-convert
+   py -3.14 -m venv rvc-convert
    rvc-convert\Scripts\pip install torch --index-url https://download.pytorch.org/whl/cpu
    rvc-convert\Scripts\pip install numpy scipy onnx onnxruntime
    rvc-convert\Scripts\python convert_rvc.py myvoice.pth myvoice.onnx
