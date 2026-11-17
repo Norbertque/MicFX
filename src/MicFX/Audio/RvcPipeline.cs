@@ -44,6 +44,16 @@ public interface IVoiceGenerator
 }
 
 /// <summary>
+/// Streaming quality: how much extra the models see around each block. Measured
+/// against converting a whole utterance at once (tools: see the 1.13 notes),
+/// lookahead helps most, then decoder context, then a longer content context.
+/// </summary>
+/// <param name="EncoderContextMs">Audio before the returned part that the content encoder sees (0 = the generator's window).</param>
+/// <param name="DecoderContextFrames">10 ms frames before the returned part that the decoder synthesises and drops.</param>
+/// <param name="LookaheadFrames">10 ms frames after the returned part the models see; must match the stream timing's lookahead.</param>
+public readonly record struct RvcQuality(int EncoderContextMs, int DecoderContextFrames, int LookaheadFrames);
+
+/// <summary>
 /// The RVC voice conversion steps around the three models, following RVC's
 /// real-time inference (infer/lib/rtrvc.py, MIT): 16 kHz content features
 /// over the whole context, each 20 ms frame used twice for the 10 ms frame
@@ -69,7 +79,10 @@ public sealed class RvcPipeline : IVoiceConverter
     private readonly IVoiceGenerator generator;
     private readonly RationalResampler down;
     private readonly RationalResampler up;
-    private readonly int dim, frames, frames20, blockFrames, returnFrames, pitchSamples, pitchNew;
+    private readonly int dim, frames, encFrames, frames20, blockFrames, returnFrames, pitchSamples, pitchNew;
+    private readonly int decoderContext, lookahead, perFrame;
+    private readonly FeatureIndex? index;
+    private float indexRate;
     private readonly float[] audio16;
     private readonly float[] features20;
     private readonly float[] features;
@@ -81,10 +94,15 @@ public sealed class RvcPipeline : IVoiceConverter
     private readonly float[] resampled;
     private float transpose;
 
-    /// <param name="timing">Stream timing; block, crossfade and search must be multiples of 10 ms.</param>
-    public RvcPipeline(VoiceTiming timing, IContentEncoder encoder, IPitchExtractor? pitch, IVoiceGenerator generator)
+    /// <param name="timing">Stream timing; block, crossfade, search and lookahead must be multiples of 10 ms.</param>
+    /// <param name="index">The voice model's feature index, or null; its size must match the model's features.</param>
+    public RvcPipeline(VoiceTiming timing, IContentEncoder encoder, IPitchExtractor? pitch, IVoiceGenerator generator,
+        RvcQuality quality = default, FeatureIndex? index = null)
     {
         if (timing.Output % 480 != 0 || timing.Block % 480 != 0) throw new ArgumentException("Timing must be on a 10 ms grid.", nameof(timing));
+        if (timing.Lookahead != quality.LookaheadFrames * 480) throw new ArgumentException("The timing's lookahead does not match the quality setting.", nameof(timing));
+        if (index != null && index.Dim != generator.FeatureDim)
+            throw new ArgumentException($"The index has {index.Dim} features per frame, the model {generator.FeatureDim}.", nameof(index));
         if (generator.UsesPitch && pitch == null) throw new ArgumentException("This model needs a pitch extractor.", nameof(pitch));
         this.encoder = encoder;
         this.pitch = generator.UsesPitch ? pitch : null;
@@ -94,11 +112,18 @@ public sealed class RvcPipeline : IVoiceConverter
         int outputFrames = timing.Output / 480;
         returnFrames = outputFrames + 1;
         blockFrames = timing.Block / 480;
-        frames = generator.Frames > 0 ? generator.Frames : DefaultContextMs / 10 + outputFrames;
-        if (frames < returnFrames + 24 + 6 || frames < blockFrames + 6)
-            throw new ArgumentException($"The model works on {frames} frames, too few for this delay setting.", nameof(generator));
-        ContextSamples = frames * 480;
-        int samples16 = frames * 160;
+        decoderContext = quality.DecoderContextFrames;
+        lookahead = quality.LookaheadFrames;
+        perFrame = generator.SampleRate / 100;
+        int needed = returnFrames + decoderContext + lookahead;
+        frames = generator.Frames > 0 ? generator.Frames : DefaultContextMs / 10 + outputFrames + decoderContext + lookahead;
+        if (frames < needed + 24 + 6 || frames < blockFrames + 6)
+            throw new ArgumentException($"The model works on {frames} frames, too few for this delay and quality setting.", nameof(generator));
+        encFrames = Math.Max(frames, quality.EncoderContextMs / 10 + outputFrames + lookahead);
+        // Keep the 20 ms pairing of 10 ms frames the same from block to block.
+        if ((encFrames - frames) % 2 != 0) encFrames++;
+        ContextSamples = encFrames * 480;
+        int samples16 = encFrames * 160;
         frames20 = (samples16 - 400) / 320 + 1;
         pitchSamples = blockFrames * 160 + 800; // the new block plus 50 ms
         pitchNew = blockFrames + 2;             // tracker frames kept: all but the first three and the last
@@ -113,7 +138,8 @@ public sealed class RvcPipeline : IVoiceConverter
         f0Cache = new float[frames];
         f0 = new float[frames];
         coarse = new long[frames];
-        generated = new float[returnFrames * generator.SampleRate / 100];
+        generated = new float[(returnFrames + decoderContext) * perFrame];
+        this.index = index;
         resampled = new float[returnFrames * 480];
     }
 
@@ -131,6 +157,29 @@ public sealed class RvcPipeline : IVoiceConverter
     /// <summary>Samples of 16 kHz audio the pitch extractor gets per call.</summary>
     public int PitchSamples => pitchSamples;
 
+    public bool HasIndex => index != null;
+
+    /// <summary>Whether a generator with a fixed frame count has room for this timing and quality.</summary>
+    public static bool Fits(IVoiceGenerator generator, VoiceTiming timing, RvcQuality quality)
+    {
+        if (generator.Frames <= 0) return true;
+        int needed = timing.Output / 480 + 1 + quality.DecoderContextFrames + quality.LookaheadFrames;
+        return generator.Frames >= needed + 24 + 6 && generator.Frames >= timing.Block / 480 + 6;
+    }
+
+    /// <summary>First generator frame synthesised per call (decoder context included).</summary>
+    public int DecodeStart => frames - returnFrames - lookahead - decoderContext;
+
+    /// <summary>
+    /// How strongly features are pulled towards the voice model's own recordings
+    /// (RVC's index rate, 0..1); no effect without an index. Safe to set from any thread.
+    /// </summary>
+    public float IndexRate
+    {
+        get => Volatile.Read(ref indexRate);
+        set => Volatile.Write(ref indexRate, Math.Clamp(value, 0f, 1f));
+    }
+
     /// <summary>Pitch shift in semitones applied before synthesis. Safe to set from any thread.</summary>
     public float Transpose
     {
@@ -143,10 +192,21 @@ public sealed class RvcPipeline : IVoiceConverter
         down.Process(context, audio16);
         encoder.Encode(audio16, dim, features20);
 
-        // 10 ms frame j uses 20 ms frame j / 2 (upstream appends the last frame
-        // once and repeats each frame twice).
+        // Generator frame t is encoder 10 ms frame e = offset + t, which uses 20 ms frame
+        // e / 2 (upstream appends the last frame once and repeats each frame twice).
+        int offset = encFrames - frames;
+        int start = DecodeStart;
+
+        // RVC's index: only for the frames that are synthesised, as upstream.
+        float rate = IndexRate;
+        if (index != null && rate > 0f)
+        {
+            int first = Math.Min((offset + start) / 2, frames20 - 1);
+            index.Blend(features20.AsSpan(first * dim, (frames20 - first) * dim), rate);
+        }
+
         for (int t = 0; t < frames; t++)
-            Array.Copy(features20, Math.Min(t / 2, frames20 - 1) * dim, features, t * dim, dim);
+            Array.Copy(features20, Math.Min((offset + t) / 2, frames20 - 1) * dim, features, t * dim, dim);
 
         if (pitch != null)
         {
@@ -170,8 +230,8 @@ public sealed class RvcPipeline : IVoiceConverter
         }
 
         generator.Generate(features, pitch != null ? coarse : default, pitch != null ? f0 : default,
-            frames - returnFrames, returnFrames, generated);
-        up.Process(generated, resampled);
+            start, returnFrames + decoderContext, generated);
+        up.Process(generated.AsSpan(decoderContext * perFrame), resampled);
         resampled.AsSpan(480).CopyTo(output);
     }
 

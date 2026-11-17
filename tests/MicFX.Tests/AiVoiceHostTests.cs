@@ -82,6 +82,40 @@ public class AiVoiceHostTests : IDisposable
     }
 
     [Fact]
+    public async Task HigherQualityAndAnIndex_StepDownOrAreDroppedWithANote_NeverFail()
+    {
+        using var host = Host();
+        await host.InstallAsync(host.MissingFiles(AiBackend.Cpu), null, CancellationToken.None);
+        // The test index has 16 features per frame, the test model 768: reported, voice still runs.
+        // The test model has 64 frames, too few for Best: it steps down to High and says so.
+        string index = Path.Combine(Fixtures, "ivf-full.index");
+        Assert.True(await host.LoadAsync(Path.Combine(Fixtures, "gen-micfx.onnx"), AiBackend.Cpu, AiVoiceDelay.Normal,
+            quality: AiVoiceQuality.Best, indexPath: index));
+        Assert.Equal(AiVoiceDelays.Ms(AiVoiceDelay.Normal, AiVoiceQuality.High), host.DelayMs);
+        Assert.Null(host.IndexPath);
+        Assert.Contains("Index not used", host.Status);
+        Assert.Contains("using High", host.Status);
+        await host.UnloadAsync();
+    }
+
+    [Fact]
+    public void IndexFile_IsFoundNextToTheModel()
+    {
+        Directory.CreateDirectory(root);
+        string model = Path.Combine(root, "Voice.onnx");
+        File.WriteAllText(model, "");
+        Assert.Null(AiVoiceHost.FindIndex(model));
+        string only = Path.Combine(root, "model.index");
+        File.WriteAllText(only, "");
+        Assert.Equal(only, AiVoiceHost.FindIndex(model));             // the only one in the folder
+        string named = Path.Combine(root, "Voice.index");
+        File.WriteAllText(named, "");
+        Assert.Equal(named, AiVoiceHost.FindIndex(model));            // the model's own name wins
+        Assert.Equal(only, AiVoiceHost.FindIndex(model, only));       // a chosen one wins over both
+        Assert.Equal(named, AiVoiceHost.FindIndex(model, Path.Combine(root, "gone.index")));
+    }
+
+    [Fact]
     public async Task NotAVoiceModel_FailsWithAReason()
     {
         using var host = Host();
@@ -103,15 +137,19 @@ public class AiVoiceHostTests : IDisposable
     [Fact]
     public void DelayPresets_AreOnTheTenMillisecondGrid()
     {
+        Assert.Equal(240, AiVoiceDelays.Ms(AiVoiceDelay.Normal, AiVoiceQuality.High));
+        Assert.Equal(270, AiVoiceDelays.Ms(AiVoiceDelay.Normal, AiVoiceQuality.Best));
         Assert.Equal(150, AiVoiceDelays.Ms(AiVoiceDelay.Short));
         Assert.Equal(210, AiVoiceDelays.Ms(AiVoiceDelay.Normal));
         Assert.Equal(310, AiVoiceDelays.Ms(AiVoiceDelay.Safe));
         foreach (var d in Enum.GetValues<AiVoiceDelay>())
-        {
-            var t = AiVoiceDelays.Timing(d);
-            Assert.Equal(0, t.Output % 480);
-            Assert.Equal(0, t.Block % 480);
-        }
+            foreach (var q in Enum.GetValues<AiVoiceQuality>())
+            {
+                var t = AiVoiceDelays.Timing(d, q);
+                Assert.Equal(0, t.Output % 480);
+                Assert.Equal(0, t.Block % 480);
+                Assert.Equal(AiVoiceDelays.Quality(q).LookaheadFrames * 480, t.Lookahead);
+            }
     }
 }
 

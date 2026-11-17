@@ -174,6 +174,70 @@ public class RvcPipelineTests
     }
 
     [Theory]
+    [InlineData(0, 0)]
+    [InlineData(8, 3)]
+    [InlineData(16, 6)]
+    public void DecoderContextAndLookahead_ShiftWhatIsSynthesisedAndReturned(int decoderContext, int lookahead)
+    {
+        var timing = VoiceTiming.FromMs(100, 60, lookaheadMs: lookahead * 10);
+        var gen = new RecordingGenerator { SampleRate = 40000, Frames = 128 };
+        var p = new RvcPipeline(timing, new FrameIndexEncoder(), new RampPitch(), gen, new RvcQuality(0, decoderContext, lookahead));
+        var output = new float[timing.Output];
+        p.Convert(new float[p.ContextSamples], output, true);
+
+        int outputFrames = timing.Output / 480;
+        Assert.Equal(128 - (outputFrames + 1) - lookahead - decoderContext, gen.SkipHead);
+        Assert.Equal(outputFrames + 1 + decoderContext, gen.ReturnFrames);
+        // The decoder context and the resampler's edge frame are dropped; the output ends
+        // `lookahead` frames before the newest.
+        for (int t = 0; t < outputFrames; t++)
+            for (int i = 120; i < 360; i++)
+                Assert.Equal(128 - outputFrames - lookahead + t, output[t * 480 + i], 2);
+    }
+
+    [Fact]
+    public void LongerContentContext_FeedsTheEncoderMore_AndTheGeneratorTheNewestFrames()
+    {
+        var timing = VoiceTiming.FromMs(100, 60, lookaheadMs: 60);
+        var encoder = new FrameIndexEncoder();
+        var gen = new RecordingGenerator { FeatureDim = 256, Frames = 128 };
+        var p = new RvcPipeline(timing, encoder, new RampPitch(), gen, new RvcQuality(2500, 16, 6));
+        p.Convert(new float[p.ContextSamples], new float[timing.Output], true);
+
+        int encFrames = p.ContextSamples / 480;
+        Assert.True(encFrames >= 250 + timing.Output / 480 + 6);
+        Assert.Equal(0, (encFrames - 128) % 2);
+        Assert.Equal(encFrames * 160, encoder.Samples);
+        int frames20 = (encoder.Samples - 400) / 320 + 1;
+        for (int t = 0; t < 128; t++)
+            Assert.Equal(Math.Min((encFrames - 128 + t) / 2, frames20 - 1), gen.Features[t * 256]);
+    }
+
+    [Fact]
+    public void Index_ChangesOnlyTheSynthesisedFrames_ByItsRate()
+    {
+        var index = FeatureIndex.Load(Path.Combine(AppContext.BaseDirectory, "Fixtures", "ivf-full.index"));
+        var timing = VoiceTiming.FromMs(100, 60, lookaheadMs: 30);
+        var quality = new RvcQuality(0, 8, 3);
+        var plain = new RecordingGenerator { FeatureDim = 16, Frames = 128 };
+        var indexed = new RecordingGenerator { FeatureDim = 16, Frames = 128 };
+        new RvcPipeline(timing, new FrameIndexEncoder(), new RampPitch(), plain, quality, index) { IndexRate = 0f }
+            .Convert(new float[128 * 480], new float[timing.Output], true);
+        var p = new RvcPipeline(timing, new FrameIndexEncoder(), new RampPitch(), indexed, quality, index) { IndexRate = 1f };
+        p.Convert(new float[p.ContextSamples], new float[timing.Output], true);
+
+        Assert.True(p.HasIndex);
+        int firstRow = p.DecodeStart / 2 * 2; // frames sharing the first changed 20 ms frame
+        for (int t = 0; t < 128; t++)
+        {
+            bool same = plain.Features.AsSpan(t * 16, 16).SequenceEqual(indexed.Features.AsSpan(t * 16, 16));
+            Assert.Equal(t < firstRow, same);
+        }
+        Assert.Throws<ArgumentException>(() => new RvcPipeline(timing, new FrameIndexEncoder(), new RampPitch(),
+            new RecordingGenerator { FeatureDim = 768, Frames = 128 }, quality, index));
+    }
+
+    [Theory]
     [InlineData(48000)]
     [InlineData(40000)]
     [InlineData(32000)]

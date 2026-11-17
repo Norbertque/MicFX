@@ -18,17 +18,41 @@ public enum AiVoiceDelay
     Safe,
 }
 
+/// <summary>How much the models see around each block: more GPU time and delay for a cleaner voice.</summary>
+public enum AiVoiceQuality
+{
+    /// <summary>What 1.12 did.</summary>
+    Standard,
+
+    /// <summary>80 ms of decoder context, 30 ms lookahead (+30 ms delay).</summary>
+    High,
+
+    /// <summary>2.5 s content context, 160 ms decoder context, 60 ms lookahead (+60 ms delay).</summary>
+    Best,
+}
+
 public static class AiVoiceDelays
 {
-    public static VoiceTiming Timing(AiVoiceDelay delay) => delay switch
+    public static RvcQuality Quality(AiVoiceQuality quality) => quality switch
     {
-        AiVoiceDelay.Short => VoiceTiming.FromMs(60, 40),
-        AiVoiceDelay.Safe => VoiceTiming.FromMs(160, 100),
-        _ => VoiceTiming.FromMs(100, 60),
+        AiVoiceQuality.High => new RvcQuality(0, 8, 3),
+        AiVoiceQuality.Best => new RvcQuality(2500, 16, 6),
+        _ => new RvcQuality(0, 0, 0),
     };
 
+    public static VoiceTiming Timing(AiVoiceDelay delay, AiVoiceQuality quality = AiVoiceQuality.Standard)
+    {
+        int lookaheadMs = Quality(quality).LookaheadFrames * 10;
+        return delay switch
+        {
+            AiVoiceDelay.Short => VoiceTiming.FromMs(60, 40, lookaheadMs: lookaheadMs),
+            AiVoiceDelay.Safe => VoiceTiming.FromMs(160, 100, lookaheadMs: lookaheadMs),
+            _ => VoiceTiming.FromMs(100, 60, lookaheadMs: lookaheadMs),
+        };
+    }
+
     /// <summary>Delay the voice gets, in ms.</summary>
-    public static int Ms(AiVoiceDelay delay) => Timing(delay).Delay / 48;
+    public static int Ms(AiVoiceDelay delay, AiVoiceQuality quality = AiVoiceQuality.Standard) => Timing(delay, quality).Delay / 48;
 }
 
 public enum AiVoiceState { Off, Loading, Running, Failed }
@@ -65,6 +89,8 @@ public sealed class AiVoiceHost : IDisposable
     private float pitch;
     private long loggedMisses;
 
+    private float indexRate = 0.75f;
+
     private sealed record Loaded(VoiceStream Stream, RvcPipeline Pipeline, OnnxContentEncoder Encoder,
         OnnxPitchExtractor? Pitch, OnnxVoiceGenerator Generator, AiBackend Backend);
 
@@ -95,6 +121,35 @@ public sealed class AiVoiceHost : IDisposable
     public int DelayMs => current == null ? 0 : current.Stream.Timing.Delay / 48;
 
     /// <summary>Pitch shift in semitones; applies at once while running.</summary>
+    /// <summary>RVC's index rate (0..1); applies at once while running.</summary>
+    public float IndexRate
+    {
+        get => indexRate;
+        set
+        {
+            indexRate = value;
+            if (current != null) current.Pipeline.IndexRate = value;
+        }
+    }
+
+    /// <summary>The index file in use while running, or null.</summary>
+    public string? IndexPath { get; private set; }
+
+    /// <summary>
+    /// The voice model's .index file: <paramref name="chosen"/> if it exists, else one
+    /// with the model's name, else the only .index file in the model's folder.
+    /// </summary>
+    public static string? FindIndex(string modelPath, string? chosen = null)
+    {
+        if (!string.IsNullOrEmpty(chosen) && File.Exists(chosen)) return chosen;
+        string? folder = Path.GetDirectoryName(modelPath);
+        if (string.IsNullOrEmpty(folder) || !Directory.Exists(folder)) return null;
+        string same = Path.ChangeExtension(modelPath, ".index");
+        if (File.Exists(same)) return same;
+        var all = Directory.GetFiles(folder, "*.index");
+        return all.Length == 1 ? all[0] : null;
+    }
+
     public float Pitch
     {
         get => pitch;
@@ -138,14 +193,15 @@ public sealed class AiVoiceHost : IDisposable
     /// saying why) when it cannot run. Files must be installed first. <paramref name="note"/>
     /// (for example why the GPU is not used) is logged and kept as the status while running.
     /// </summary>
-    public async Task<bool> LoadAsync(string modelPath, AiBackend backend, AiVoiceDelay delay, string? note = null)
+    public async Task<bool> LoadAsync(string modelPath, AiBackend backend, AiVoiceDelay delay, string? note = null,
+        AiVoiceQuality quality = AiVoiceQuality.Standard, string? indexPath = null)
     {
         await busy.WaitAsync().ConfigureAwait(false);
         try
         {
             await UnloadCoreAsync().ConfigureAwait(false);
             SetState(AiVoiceState.Loading, $"Loading {Path.GetFileNameWithoutExtension(modelPath)}...");
-            var loaded = await Task.Run(() => Load(modelPath, backend, delay)).ConfigureAwait(false);
+            var loaded = await Task.Run(() => Load(modelPath, backend, delay, quality, indexPath)).ConfigureAwait(false);
             current = loaded.Value;
             if (current == null)
             {
@@ -165,10 +221,10 @@ public sealed class AiVoiceHost : IDisposable
         }
     }
 
-    private (Loaded? Value, string Note) Load(string modelPath, AiBackend backend, AiVoiceDelay delay)
+    private (Loaded? Value, string Note) Load(string modelPath, AiBackend backend, AiVoiceDelay delay, AiVoiceQuality quality, string? indexPath)
     {
-        var timing = AiVoiceDelays.Timing(delay);
-        Log.Write($"Loading {modelPath} on {(backend == AiBackend.Cuda ? "NVIDIA GPU" : "CPU")}, delay {timing.Delay / 48} ms");
+        var timing = AiVoiceDelays.Timing(delay, quality);
+        Log.Write($"Loading {modelPath} on {(backend == AiBackend.Cuda ? "NVIDIA GPU" : "CPU")}, delay {timing.Delay / 48} ms, quality {quality}");
         if (!File.Exists(modelPath)) return (null, $"The voice model file was not found: {modelPath}");
         var missing = MissingFiles(AiBackend.Cpu);
         if (missing.Count > 0) return (null, $"{missing[0].Title} is not downloaded yet.");
@@ -196,19 +252,42 @@ public sealed class AiVoiceHost : IDisposable
             }
         }
 
-        var result = TryCreate(modelPath, backend, timing);
+        FeatureIndex? index = null;
+        IndexPath = null;
+        if (indexPath != null)
+        {
+            try
+            {
+                long t0 = Stopwatch.GetTimestamp();
+                index = FeatureIndex.Load(indexPath);
+                Log.Write($"Index {indexPath}: {index.Count} recorded frames, {index.Dim} features, " +
+                          $"loaded in {Stopwatch.GetElapsedTime(t0).TotalMilliseconds:F0} ms");
+            }
+            catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException)
+            {
+                Log.Write($"Index not used: {ex.Message}");
+                note = $"Index not used: {ex.Message}";
+            }
+        }
+
+        var result = TryCreate(modelPath, backend, delay, quality, index);
         if (result.Value == null && backend == AiBackend.Cuda && result.Recoverable)
         {
             Log.Write($"NVIDIA GPU could not start: {result.Error}");
             note = $"NVIDIA GPU could not start ({result.Error}). Running on the CPU.";
             backend = AiBackend.Cpu;
-            result = TryCreate(modelPath, backend, timing);
+            result = TryCreate(modelPath, backend, delay, quality, index);
         }
+        if (result.Value?.Pipeline is { } p && index != null && !p.HasIndex)
+            note = (note.Length > 0 ? note + " " : "") + $"Index not used: it has {index.Dim} features per frame, the model {result.Value.Generator.FeatureDim}.";
+        if (result.Value?.Pipeline.HasIndex == true) IndexPath = indexPath;
         if (result.Value == null) return (null, result.Error);
+        if (result.Note.Length > 0) note = (note.Length > 0 ? note + " " : "") + result.Note;
         return (result.Value, note);
     }
 
-    private (Loaded? Value, string Error, bool Recoverable) TryCreate(string modelPath, AiBackend backend, VoiceTiming timing)
+    private (Loaded? Value, string Error, bool Recoverable, string Note) TryCreate(string modelPath, AiBackend backend,
+        AiVoiceDelay delay, AiVoiceQuality wanted, FeatureIndex? index)
     {
         OnnxContentEncoder? encoder = null;
         OnnxPitchExtractor? pitchExtractor = null;
@@ -222,7 +301,21 @@ public sealed class AiVoiceHost : IDisposable
                       $"{(generator.UsesPitch ? "with" : "without")} pitch");
             encoder = new OnnxContentEncoder(Path.Combine(helpers, "contentvec.onnx"), sessionOptions);
             if (generator.UsesPitch) pitchExtractor = new OnnxPitchExtractor(Path.Combine(helpers, "fcpe.onnx"), sessionOptions);
-            var pipeline = new RvcPipeline(timing, encoder, pitchExtractor, generator) { Transpose = pitch };
+            if (index != null && index.Dim != generator.FeatureDim) index = null; // reported by the caller
+
+            // A model converted with a short frame count may not have room for the higher settings.
+            var quality = wanted;
+            while (quality > AiVoiceQuality.Standard &&
+                   !RvcPipeline.Fits(generator, AiVoiceDelays.Timing(delay, quality), AiVoiceDelays.Quality(quality)))
+                quality--;
+            string qualityNote = quality == wanted ? "" : $"Quality {wanted} does not fit this voice model; using {quality}.";
+            if (qualityNote.Length > 0) Log.Write(qualityNote);
+            var timing = AiVoiceDelays.Timing(delay, quality);
+            var pipeline = new RvcPipeline(timing, encoder, pitchExtractor, generator, AiVoiceDelays.Quality(quality), index)
+            {
+                Transpose = pitch,
+                IndexRate = indexRate,
+            };
 
             // Warm up: the first runs allocate memory and pick kernels.
             var context = new float[pipeline.ContextSamples];
@@ -237,7 +330,7 @@ public sealed class AiVoiceHost : IDisposable
             }
             Log.Write($"Running on {(backend == AiBackend.Cuda ? "NVIDIA GPU" : "CPU")}: {ms:F0} ms per block after warm-up, " +
                       $"allowance {timing.Allowance / 48} ms, block {timing.Block / 48} ms");
-            return (new Loaded(new VoiceStream(timing, pipeline), pipeline, encoder, pitchExtractor, generator, backend), "", false);
+            return (new Loaded(new VoiceStream(timing, pipeline), pipeline, encoder, pitchExtractor, generator, backend), "", false, qualityNote);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -246,7 +339,7 @@ public sealed class AiVoiceHost : IDisposable
             pitchExtractor?.Dispose();
             bool modelProblem = ex is InvalidDataException;
             Log.Write($"Could not start on {backend}: {ex.GetType().Name}: {ex.Message}");
-            return (null, FirstLine(ex.Message), !modelProblem);
+            return (null, FirstLine(ex.Message), !modelProblem, "");
         }
     }
 

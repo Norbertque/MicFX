@@ -8,16 +8,17 @@ namespace MicFX.Audio;
 /// <param name="Crossfade">SOLA overlap: how long consecutive blocks are crossfaded.</param>
 /// <param name="Search">SOLA search range: how far a block may be shifted to line up with the previous one.</param>
 /// <param name="Allowance">Time the model gets per block, from the block's last input sample to its first output sample.</param>
-public readonly record struct VoiceTiming(int Block, int Crossfade, int Search, int Allowance)
+/// <param name="Lookahead">Input the model sees after the audio it returns (more delay, better quality).</param>
+public readonly record struct VoiceTiming(int Block, int Crossfade, int Search, int Allowance, int Lookahead = 0)
 {
     /// <summary>Samples the model returns per call.</summary>
     public int Output => Block + Crossfade + Search;
 
     /// <summary>Fixed delay from input to output.</summary>
-    public int Delay => Block + Crossfade + Search + Allowance;
+    public int Delay => Block + Crossfade + Search + Allowance + Lookahead;
 
-    public static VoiceTiming FromMs(int blockMs, int allowanceMs, int crossfadeMs = 40, int searchMs = 10) =>
-        new(blockMs * 48, crossfadeMs * 48, searchMs * 48, allowanceMs * 48);
+    public static VoiceTiming FromMs(int blockMs, int allowanceMs, int crossfadeMs = 40, int searchMs = 10, int lookaheadMs = 0) =>
+        new(blockMs * 48, crossfadeMs * 48, searchMs * 48, allowanceMs * 48, lookaheadMs * 48);
 }
 
 /// <summary>A voice model, as seen by <see cref="VoiceStream"/>.</summary>
@@ -28,8 +29,9 @@ public interface IVoiceConverter
 
     /// <summary>
     /// Converts one block. Called on the worker thread only. <paramref name="context"/> holds the
-    /// newest input (zeros before the stream started); write the converted audio for its last
-    /// <c>output.Length</c> samples, time-aligned with them. <paramref name="continuous"/> is false
+    /// newest input (zeros before the stream started); write the converted audio for the
+    /// <c>output.Length</c> samples that end <see cref="VoiceTiming.Lookahead"/> samples before its
+    /// end, time-aligned with them. <paramref name="continuous"/> is false
     /// when the previous block was not converted, so state carried between calls must be reset.
     /// </summary>
     void Convert(ReadOnlySpan<float> context, Span<float> output, bool continuous);
@@ -140,7 +142,7 @@ public sealed class VoiceStream : IDisposable
         crossfade = timing.Crossfade;
         search = timing.Search;
         allowance = timing.Allowance;
-        context = Math.Max(converter.ContextSamples, timing.Output);
+        context = Math.Max(converter.ContextSamples, timing.Output + timing.Lookahead);
 
         int ring = 1;
         while (ring < context + 4 * block + allowance + 48000) ring <<= 1;
@@ -387,7 +389,7 @@ public sealed class VoiceStream : IDisposable
             return true;
         }
 
-        var region = wContext.AsSpan(context - timing.Output);
+        var region = wContext.AsSpan(context - timing.Output - timing.Lookahead);
         bool silent = Dot(region, region) < SilenceRms * SilenceRms * region.Length;
         if (silent)
         {

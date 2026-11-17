@@ -135,6 +135,29 @@ public class VoiceStreamTests
         }
     }
 
+    /// <summary>Identity model that returns the audio ending <c>lookahead</c> samples before the newest.</summary>
+    private sealed class LookaheadModel : IVoiceConverter
+    {
+        private readonly int lookahead;
+        public LookaheadModel(int lookahead) => this.lookahead = lookahead;
+        public int ContextSamples => Timing.Output + 9600;
+        public void Convert(ReadOnlySpan<float> context, Span<float> output, bool continuous) =>
+            context.Slice(context.Length - lookahead - output.Length, output.Length).CopyTo(output);
+    }
+
+    [Fact]
+    public void Lookahead_AddsExactlyItsLengthToTheDelay()
+    {
+        var timing = VoiceTiming.FromMs(100, 60, lookaheadMs: 30);
+        Assert.Equal(Timing.Delay + 1440, timing.Delay);
+        var input = Noise(48000 * 3, seed: 12);
+        using var rig = new Rig(input, new LookaheadModel(timing.Lookahead), timing: timing);
+        rig.Run(input.Length, 480);
+        int d = timing.Delay;
+        for (int i = d + VoiceStream.FadeSamples; i < input.Length; i++)
+            Assert.True(Math.Abs(rig.Output[i] - input[i - d]) <= 1e-6f, $"sample {i}");
+    }
+
     [Fact]
     public void IdentityModel_GivesInputDelayedByExactlyD_ForAnyReadSizeUpToTheAllowance()
     {
