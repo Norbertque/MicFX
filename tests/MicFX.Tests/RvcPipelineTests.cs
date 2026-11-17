@@ -133,6 +133,37 @@ public class RvcPipelineTests
     }
 
     [Fact]
+    public void PitchThatIsNotAFrequency_IsUnvoiced()
+    {
+        // FCPE can return NaN for frames it is not confident about (silence); RVC's
+        // coarse scale would turn that into an index the model rejects.
+        Assert.Equal(1, RvcPipeline.CoarsePitch(float.NaN));
+        Assert.Equal(1, RvcPipeline.CoarsePitch(-5f));
+
+        var gen = new RecordingGenerator();
+        var p = new RvcPipeline(Timing, new FrameIndexEncoder(), new OddPitch(), gen);
+        p.Convert(new float[p.ContextSamples], new float[Timing.Output], continuous: false);
+        Assert.All(gen.F0, hz => Assert.True(float.IsFinite(hz) && hz >= 0));
+        Assert.All(gen.Coarse, c => Assert.InRange(c, 1, 255));
+        int kept = Timing.Block / 480 + 2, frames = p.Frames;
+        Assert.Equal(0f, gen.F0[frames - kept]);      // NaN
+        Assert.Equal(0f, gen.F0[frames - kept + 1]);  // +inf
+        Assert.Equal(0f, gen.F0[frames - kept + 2]);  // negative
+        Assert.Equal(220f, gen.F0[frames - kept + 3]);
+    }
+
+    private sealed class OddPitch : IPitchExtractor
+    {
+        public void Extract(ReadOnlySpan<float> audio16k, Span<float> f0)
+        {
+            f0.Fill(220f);
+            f0[3] = float.NaN;
+            f0[4] = float.PositiveInfinity;
+            f0[5] = -1f;
+        }
+    }
+
+    [Fact]
     public void ModelWithoutPitch_GetsNoPitch()
     {
         var gen = new RecordingGenerator { UsesPitch = false };

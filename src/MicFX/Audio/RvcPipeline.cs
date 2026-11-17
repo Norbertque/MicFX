@@ -60,6 +60,7 @@ public sealed class RvcPipeline : IVoiceConverter
     public const int DefaultContextMs = 1000;
 
     private const float F0Min = 50f, F0Max = 1100f;
+    private const float MaxF0 = 8000f; // above this a tracker's value is not a voice
     private static readonly float MelMin = 1127f * MathF.Log(1f + F0Min / 700f);
     private static readonly float MelMax = 1127f * MathF.Log(1f + F0Max / 700f);
 
@@ -153,6 +154,10 @@ public sealed class RvcPipeline : IVoiceConverter
             if (continuous) Array.Copy(f0Cache, blockFrames, f0Cache, 0, frames - blockFrames);
             else Array.Clear(f0Cache);
             pitch.Extract(audio16.AsSpan(audio16.Length - pitchSamples), f0Window);
+            // Anything that is not a frequency (FCPE gives NaN for frames it is not
+            // confident about, e.g. silence) is unvoiced.
+            for (int i = 0; i < f0Window.Length; i++)
+                if (!(f0Window[i] > 0f && f0Window[i] < MaxF0)) f0Window[i] = 0f;
             Array.Copy(f0Window, 3, f0Cache, frames - pitchNew, pitchNew);
 
             float factor = MathF.Pow(2f, Transpose / 12f);
@@ -173,6 +178,7 @@ public sealed class RvcPipeline : IVoiceConverter
     /// <summary>RVC's pitch quantisation: mel scale, 1 = unvoiced, 1..255 over 50..1100 Hz.</summary>
     public static long CoarsePitch(float f0)
     {
+        if (!(f0 > 0f)) return 1; // unvoiced, and NaN
         float mel = 1127f * MathF.Log(1f + f0 / 700f);
         if (mel > 0) mel = (mel - MelMin) * 254f / (MelMax - MelMin) + 1f;
         if (mel <= 1f) mel = 1f;

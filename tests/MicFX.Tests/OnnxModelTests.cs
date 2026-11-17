@@ -83,6 +83,28 @@ public class OnnxModelTests
     }
 
     [Fact]
+    public void ApplioExport_IsAskedForTheReturnedFramesPlusFlowContext()
+    {
+        using var gen = Generator("gen-applio.onnx");
+        Assert.Equal(RvcDialect.Applio, gen.Dialect);
+        Assert.Equal(32000, gen.SampleRate); // from Applio's "model_info"
+        Assert.Equal(256, gen.FeatureDim);
+        Assert.Equal(0, gen.Frames);
+
+        foreach (int total in new[] { 100, 115, 128 })
+        {
+            var (features, coarse, f0) = Frames(total, 256);
+            var audio = new float[16 * 320];
+            gen.Generate(features, coarse, f0, total - 16, 16, audio);
+            for (int f = 0; f < 16; f++)
+            {
+                int frame = total - 16 + f;
+                Assert.Equal(100 + frame + frame * 0.25f, audio[f * 320 + 100], 3);
+            }
+        }
+    }
+
+    [Fact]
     public void OtherOnnxFiles_AreRejectedWithAReason()
     {
         var ex = Assert.Throws<InvalidDataException>(() => Generator("fcpe-tiny.onnx"));
@@ -161,7 +183,8 @@ public class OnnxModelTests
         log.WriteLine($"{gen.Dialect}, {gen.SampleRate} Hz, {gen.FeatureDim} features, {pipeline.Frames} frames");
 
         var context = new float[pipeline.ContextSamples];
-        for (int i = 0; i < context.Length; i++) context[i] = 0.2f * MathF.Sin(2 * MathF.PI * 140 * i / 48000);
+        // A voiced sound that stops: the pitch tracker then sees silence, for which FCPE gives NaN.
+        for (int i = 0; i < context.Length - 9600; i++) context[i] = 0.2f * MathF.Sin(2 * MathF.PI * 140 * i / 48000);
         var output = new float[timing.Output];
         var times = new List<double>();
         for (int k = 0; k < 8; k++)
