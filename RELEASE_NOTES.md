@@ -7,19 +7,33 @@
 The binaries are unsigned, so SmartScreen may warn on first run
 (More info > Run anyway). In-app updates are not affected.
 
-### AI voice fixes
+### AI voice: index and quality settings
 
-- The AI voice stopped after a moment with real speech ("The AI voice
-  stopped: ... Gather ... out of data bounds"). The pitch tracker reports
-  frames it is unsure about (pauses, breaths) as not-a-number, which the
-  voice model cannot take; those frames now count as unvoiced. Found by
-  running recorded speech through a trained voice model: the converted voice
-  now follows the speaker's pitch within a semitone in 94% of voiced frames,
-  with no clicks between blocks.
-- Voice models exported to ONNX by Applio load directly, without converting
-  the .pth first.
+- Index: RVC models usually come with a `.index` file, which holds the
+  features of the model's own training recordings. MicFX now uses it the way
+  RVC does: each new frame is pulled towards a weighted average of its 8
+  nearest recorded frames. The new Index slider on the VOICE card sets how
+  strongly (RVC's "index rate", 75% to start). MicFX finds the index next to
+  the model (same name, or the only `.index` in the folder), or you can
+  choose it with Load.... The reader matches faiss, the library RVC writes
+  these files with, to within 5e-7, and the search takes a few milliseconds
+  per block on the CPU.
+- Settings > AI voice quality: Standard (as before), High and Best. They let
+  the models see more around each block: the decoder synthesises a little
+  of the audio before the block, and the models see 30 or 60 ms past it.
+  Measured on recorded speech through a trained model, against converting the
+  whole recording at once, High removes about 6% of the difference and Best
+  about 12% (two voices, a log-mel distance). The cost per block is about
+  1.3x (High) and 1.7x (Best) of Standard, and the delay grows by 30 or
+  60 ms; it is shown on the VOICE card and in the status line.
 
-1.12.0 added the AI voice; its notes follow.
+### Fixes
+
+- The converter's instructions now say which Python works (3.11 to 3.14);
+  with 3.15, pip cannot find ONNX Runtime.
+
+1.12.1 fixed the AI voice stopping on real speech and added Applio models;
+1.12.0 added the AI voice. Their notes follow.
 
 ### AI voice
 

@@ -26,8 +26,9 @@ mic -> gain -> noise suppression -> gate -> AI voice -> EQ -> compressor
   engine's speech detection, so loud non-voice sounds do not open it
 - Noise gate with adjustable threshold
 - AI voice: speaks with the voice of an RVC voice model you load (see
-  [AI voice](#ai-voice)), with a pitch control, on an NVIDIA GPU (CUDA) or
-  the CPU. Adds a fixed delay of about 150, 210 or 310 ms (settings menu);
+  [AI voice](#ai-voice)), with pitch and index controls and three quality
+  settings, on an NVIDIA GPU (CUDA) or the CPU. Adds a fixed delay of about
+  150, 210 or 310 ms (settings menu, plus 30 or 60 ms at higher quality);
   when the computer cannot keep up, the voice fades to silence and a warning
   shows instead of stuttering or drifting later
 - Compressor ("voice leveler") with automatic make-up gain, which lifts the
@@ -160,7 +161,9 @@ ONNX format. To make one from a .pth:
    The script downloads RVC's network code from a pinned commit (checked by
    SHA-256), converts the model and prints how closely the ONNX file matches
    PyTorch.
-3. In MicFX: VOICE > Load..., choose `myvoice.onnx`, tick AI voice.
+3. In MicFX: VOICE > Load..., choose `myvoice.onnx`, tick AI voice. Keep the
+   model's `.index` file next to it (same name, or the only `.index` in the
+   folder), or choose it with Load... as well.
 
 Models exported to ONNX by [Applio](https://github.com/IAHispano/Applio)
 (often published next to the .pth) load directly, without converting; a
@@ -173,6 +176,16 @@ tested with stand-in files, not real ones.
 
 - Pitch moves your voice into the model's range: about +12 semitones from a
   low voice to a high model, -12 the other way.
+- Index (needs the model's `.index` file) pulls your voice towards the
+  model's own recordings, as RVC's "index rate" does: higher sounds more like
+  the model, very high can blur consonants. 75% is the usual starting point.
+  It runs on the CPU and takes a few milliseconds per block.
+- Settings > AI voice quality lets the models see more around each block:
+  High (about 1.3x the GPU time, +30 ms delay) and Best (about 1.7x, +60 ms)
+  sound closer to converting the whole recording at once. Measured against
+  that, High removes about 6% of the difference and Best about 12%. A model
+  whose frame count leaves no room for a setting runs at the next one down,
+  and the status says so.
 - Settings > AI voice delay: Short (about 150 ms) needs a GPU with time to
   spare; Safe (about 310 ms) leaves the most room next to a game or VR. The
   delay is fixed; it never grows.
@@ -180,7 +193,8 @@ tested with stand-in files, not real ones.
   silence and comes back once the model keeps up again with time to spare.
   If it repeats, choose a longer delay or reduce the load on the GPU.
 - Settings > Open the AI voice log shows what happened: downloads, which
-  backend runs, start-up errors and a timing summary every 10 seconds.
+  backend runs, the index, start-up errors and a timing summary every 10
+  seconds.
 
 ## Building
 
@@ -262,6 +276,7 @@ src/MicFX/
     VoiceStream.cs               block timeline, SOLA joins, deadlines and drop-outs
     RvcPipeline.cs               RVC steps around the models (features, pitch, generator)
     RationalResampler.cs         zero-phase resampler (48 <-> 16/32/40 kHz)
+    FeatureIndex.cs              RVC .index files (faiss IVFFlat) and the index blend
   AiVoice/
     AiVoiceHost.cs               downloads, model loading, GPU/CPU fallback, log
     AiVoiceFiles.cs              pinned downloads (URLs, sizes, SHA-256)

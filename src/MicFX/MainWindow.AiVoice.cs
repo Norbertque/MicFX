@@ -25,7 +25,7 @@ public partial class MainWindow
     private bool aiDropoutNotified;
     private long aiSeenMisses;
     private DateTime aiWarningUntil;
-    private (string Model, AiBackend Backend, AiVoiceDelay Delay)? aiLoadedConfig;
+    private (string Model, AiBackend Backend, AiVoiceDelay Delay, AiVoiceQuality Quality, string? Index)? aiLoadedConfig;
 
     private AiVoiceHost AiHost
     {
@@ -36,6 +36,7 @@ public partial class MainWindow
                 aiHost = new AiVoiceHost(new AiVoiceHostOptions { Root = Path.Combine(AppSettings.SettingsDir, "ai") })
                 {
                     Pitch = settings.AiVoicePitch,
+                    IndexRate = settings.AiVoiceIndexRate,
                 };
                 aiHost.Changed += () => Dispatcher.BeginInvoke(OnAiVoiceHostChanged);
             }
@@ -47,11 +48,19 @@ public partial class MainWindow
 
     private AiVoiceDelay AiDelaySetting => Enum.TryParse<AiVoiceDelay>(settings.AiVoiceDelay, out var d) ? d : AiVoiceDelay.Normal;
 
+    private AiVoiceQuality AiQualitySetting => Enum.TryParse<AiVoiceQuality>(settings.AiVoiceQuality, out var q) ? q : AiVoiceQuality.Standard;
+
+    /// <summary>The .index file the current model would use, or null.</summary>
+    private string? AiIndexFile =>
+        string.IsNullOrEmpty(settings.AiVoiceModelPath) ? null : AiVoiceHost.FindIndex(settings.AiVoiceModelPath, settings.AiVoiceIndexPath);
+
     private void ApplyAiVoiceSettingsToUi()
     {
         aiUiUpdating = true;
         SelectByTag(comboAiBackend, settings.AiVoiceBackend);
         SelectByTag(comboAiDelay, settings.AiVoiceDelay);
+        SelectByTag(comboAiQuality, settings.AiVoiceQuality);
+        sliderAiVoiceIndex.Value = settings.AiVoiceIndexRate;
         sliderAiVoicePitch.Value = settings.AiVoicePitch;
         lblAiVoicePitch.Text = PitchLabel(settings.AiVoicePitch);
         chkAiVoice.IsChecked = settings.AiVoiceEnabled;
@@ -84,6 +93,7 @@ public partial class MainWindow
         bool modelChanged = !string.IsNullOrEmpty(p.AiVoiceModelPath) && p.AiVoiceModelPath != settings.AiVoiceModelPath;
         if (!string.IsNullOrEmpty(p.AiVoiceModelPath)) settings.AiVoiceModelPath = p.AiVoiceModelPath;
         if (p.AiVoicePitch is float pitch) sliderAiVoicePitch.Value = pitch;
+        if (p.AiVoiceIndexRate is float rate) sliderAiVoiceIndex.Value = rate;
         if (p.AiVoiceEnabled is bool on && chkAiVoice.IsChecked != on) chkAiVoice.IsChecked = on; // its handler starts or stops the voice
         else if (modelChanged && chkAiVoice.IsChecked == true) _ = StartAiVoiceAsync();
         UpdateAiVoiceUi();
@@ -137,7 +147,9 @@ public partial class MainWindow
         var host = AiHost;
         var backend = AiBackendSetting;
         var delay = AiDelaySetting;
-        if (host.State == AiVoiceState.Running && aiLoadedConfig == (model, backend, delay))
+        var quality = AiQualitySetting;
+        string? indexFile = AiIndexFile;
+        if (host.State == AiVoiceState.Running && aiLoadedConfig == (model, backend, delay, quality, indexFile))
         {
             engine.SetAiVoice(true, host.Stream);
             return;
@@ -187,10 +199,11 @@ public partial class MainWindow
 
             if (chkAiVoice.IsChecked != true) return;
             host.Pitch = settings.AiVoicePitch;
+            host.IndexRate = settings.AiVoiceIndexRate;
             engine.SetAiVoice(true, null); // silent while the model loads, so the real voice never leaks
             bool ok = await host.LoadAsync(model, backend, delay,
-                gpuNote != null ? $"NVIDIA GPU not used: {gpuNote} Running on the CPU." : null);
-            aiLoadedConfig = ok ? (model, AiBackendSetting, delay) : null;
+                gpuNote != null ? $"NVIDIA GPU not used: {gpuNote} Running on the CPU." : null, quality, indexFile);
+            aiLoadedConfig = ok ? (model, AiBackendSetting, delay, quality, indexFile) : null;
         }
         catch (Exception ex)
         {
@@ -313,7 +326,10 @@ public partial class MainWindow
         string? model = settings.AiVoiceModelPath;
         txtAiVoiceModel.Text = string.IsNullOrEmpty(model) ? "No voice model" : Path.GetFileNameWithoutExtension(model);
         bool on = chkAiVoice.IsChecked == true;
-        lblAiVoiceDelay.Text = on ? $"+{AiVoiceDelays.Ms(AiDelaySetting)} ms" : "";
+        lblAiVoiceDelay.Text = on ? $"+{(aiHost?.DelayMs is > 0 and var ms ? ms : AiVoiceDelays.Ms(AiDelaySetting, AiQualitySetting))} ms" : "";
+        bool hasIndex = AiIndexFile != null;
+        sliderAiVoiceIndex.IsEnabled = hasIndex;
+        lblAiVoiceIndex.Text = hasIndex ? $"{sliderAiVoiceIndex.Value * 100:0}%" : "no .index file";
 
         var state = aiHost?.State ?? AiVoiceState.Off;
         if (on && state == AiVoiceState.Running)
@@ -408,7 +424,7 @@ public partial class MainWindow
         var dialog = new OpenFileDialog
         {
             Title = "Load a voice model — only voices you have the right to use",
-            Filter = "Voice models (*.onnx)|*.onnx|RVC models before conversion (*.pth)|*.pth",
+            Filter = "Voice models and their indexes (*.onnx;*.index)|*.onnx;*.index|RVC models before conversion (*.pth)|*.pth",
         };
         if (!string.IsNullOrEmpty(settings.AiVoiceModelPath))
             dialog.InitialDirectory = Path.GetDirectoryName(settings.AiVoiceModelPath);
@@ -421,7 +437,16 @@ public partial class MainWindow
                 "MicFX — voice model", MessageBoxButton.OK, MessageBoxImage.Information);
             return false;
         }
+        if (dialog.FileName.EndsWith(".index", StringComparison.OrdinalIgnoreCase))
+        {
+            settings.AiVoiceIndexPath = dialog.FileName;
+            UpdateAiVoiceUi();
+            if (!string.IsNullOrEmpty(settings.AiVoiceModelPath)) return true;
+            ShowAiStatus("Index chosen; now load the voice model (.onnx).", warn: false);
+            return false;
+        }
         settings.AiVoiceModelPath = dialog.FileName;
+        settings.AiVoiceIndexPath = null; // use the index next to the new model, if any
         UpdateAiVoiceUi();
         return true;
     }
@@ -435,9 +460,19 @@ public partial class MainWindow
         if (aiHost != null) aiHost.Pitch = (float)e.NewValue;
     }
 
+    private void AiVoiceIndex_Changed(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        if (lblAiVoiceIndex == null) return;
+        if (sliderAiVoiceIndex.IsEnabled) lblAiVoiceIndex.Text = $"{e.NewValue * 100:0}%";
+        if (initializing || aiUiUpdating) return;
+        settings.AiVoiceIndexRate = (float)e.NewValue;
+        if (aiHost != null) aiHost.IndexRate = (float)e.NewValue;
+    }
+
     private void AiVoiceSetup_Changed(object sender, SelectionChangedEventArgs e)
     {
-        if (initializing || aiUiUpdating || comboAiBackend == null || comboAiDelay == null) return;
+        if (initializing || aiUiUpdating || comboAiBackend == null || comboAiDelay == null || comboAiQuality == null) return;
+        settings.AiVoiceQuality = (comboAiQuality.SelectedItem as ComboBoxItem)?.Tag as string ?? "Standard";
         settings.AiVoiceBackend = (comboAiBackend.SelectedItem as ComboBoxItem)?.Tag as string ?? "Cuda";
         settings.AiVoiceDelay = (comboAiDelay.SelectedItem as ComboBoxItem)?.Tag as string ?? "Normal";
         UpdateAiVoiceUi();

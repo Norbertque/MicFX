@@ -6,9 +6,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag (e.g. v1.12.1)'
+        description: 'Release tag (e.g. v1.13.0)'
         required: true
-        default: v1.12.1
+        default: v1.13.0
       dry_run:
         description: 'Build and test only, do not publish'
         type: boolean

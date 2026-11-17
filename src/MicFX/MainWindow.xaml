@@ -93,8 +93,15 @@
                             <ComboBoxItem Content="Normal — about 210 ms" Tag="Normal" IsSelected="True"/>
                             <ComboBoxItem Content="Safe — about 310 ms" Tag="Safe"/>
                         </ComboBox>
+                        <TextBlock Text="AI voice quality" FontSize="11" Foreground="{StaticResource SubtleTextBrush}"
+                                   Margin="0,8,0,0"/>
+                        <ComboBox x:Name="comboAiQuality" Margin="0,2,0,0" SelectionChanged="AiVoiceSetup_Changed">
+                            <ComboBoxItem Content="Standard" Tag="Standard" IsSelected="True"/>
+                            <ComboBoxItem Content="High — about 1.3× GPU time, +30 ms" Tag="High"/>
+                            <ComboBoxItem Content="Best — about 1.7× GPU time, +60 ms" Tag="Best"/>
+                        </ComboBox>
                         <TextBlock FontSize="11" Foreground="{StaticResource SubtleTextBrush}" TextWrapping="Wrap" Margin="0,4,0,0">
-                            <Run Text="A longer delay leaves the GPU more room next to games and VR."/>
+                            <Run Text="A longer delay leaves the GPU more room next to games and VR; higher quality lets the models see more around each block."/>
                             <Hyperlink Click="AiVoiceLog_Click"><Run Text="Open the AI voice log"/></Hyperlink>
                         </TextBlock>
                         <TextBlock Text="Stop all sounds hotkey" FontSize="11"
@@ -314,6 +321,15 @@
                                 TickFrequency="1" IsSnapToTickEnabled="True"
                                 ValueChanged="AiVoicePitch_Changed" Margin="0,2,0,0"
                                 ToolTip="Moves your voice into the model's range, in semitones: about +12 from a low voice to a high model, -12 the other way."/>
+                        <DockPanel Margin="0,6,0,0">
+                            <TextBlock x:Name="lblAiVoiceIndex" DockPanel.Dock="Right" Text="75%" FontSize="11"
+                                       Foreground="{StaticResource SubtleTextBrush}"/>
+                            <TextBlock Text="Index" FontSize="11" Foreground="{StaticResource SubtleTextBrush}"/>
+                        </DockPanel>
+                        <Slider x:Name="sliderAiVoiceIndex" Minimum="0" Maximum="1" Value="0.75"
+                                TickFrequency="0.05" IsSnapToTickEnabled="True"
+                                ValueChanged="AiVoiceIndex_Changed" Margin="0,2,0,0"
+                                ToolTip="How strongly the voice follows the model's own recordings, from the .index file next to the model. Higher sounds more like the model; very high can blur consonants."/>
                         <TextBlock x:Name="txtAiVoiceStatus" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,0"
                                    Foreground="{StaticResource SubtleTextBrush}" Visibility="Collapsed"/>
                         <ProgressBar x:Name="progressAiVoice" Minimum="0" Maximum="1" Margin="0,4,0,0"

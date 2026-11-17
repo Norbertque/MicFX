@@ -165,6 +165,7 @@ public partial class MainWindow
         AiVoiceEnabled = chkAiVoice.IsChecked == true,
         AiVoiceModelPath = settings.AiVoiceModelPath,
         AiVoicePitch = (float)sliderAiVoicePitch.Value,
+        AiVoiceIndexRate = (float)sliderAiVoiceIndex.Value,
     };
 
     private void ApplyProfile(Profile p)

@@ -40,6 +40,7 @@ public class Profile
     /// <summary>Voice model (.onnx) the profile uses; null keeps whatever is loaded.</summary>
     public string? AiVoiceModelPath { get; set; }
     public float? AiVoicePitch { get; set; }
+    public float? AiVoiceIndexRate { get; set; }
 }
 
 public class AppSettings
@@ -91,6 +92,12 @@ public class AppSettings
     public string AiVoiceBackend { get; set; } = "Cuda";
     /// <summary>"Short", "Normal" or "Safe" (see AiVoiceDelay).</summary>
     public string AiVoiceDelay { get; set; } = "Normal";
+    /// <summary>"Standard", "High" or "Best" (see AiVoiceQuality).</summary>
+    public string AiVoiceQuality { get; set; } = "Standard";
+    /// <summary>RVC's index rate, 0..1: how strongly the voice follows the model's .index file.</summary>
+    public float AiVoiceIndexRate { get; set; } = 0.75f;
+    /// <summary>An .index file chosen by hand; null finds the one next to the voice model.</summary>
+    public string? AiVoiceIndexPath { get; set; }
     /// <summary>The user accepted NVIDIA's license for the CUDA and cuDNN downloads.</summary>
     public bool AiVoiceNvidiaAccepted { get; set; }
 
